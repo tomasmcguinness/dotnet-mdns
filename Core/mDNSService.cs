@@ -8,7 +8,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
-namespace ColdBear.mDNS
+namespace Core
 {
     public class mDNSService
     {
@@ -20,7 +20,7 @@ namespace ColdBear.mDNS
 
                 NetworkInterface[] nics = NetworkInterface.GetAllNetworkInterfaces();
 
-                IPv4InterfaceProperties selectedInterface = null;
+                IPv6InterfaceProperties selectedInterface = null;
 
                 foreach (NetworkInterface adapter in nics)
                 {
@@ -36,11 +36,11 @@ namespace ColdBear.mDNS
                         continue; // this adapter is off or not connected
                     }
 
-                    IPv4InterfaceProperties p = adapter.GetIPProperties().GetIPv4Properties();
+                    IPv6InterfaceProperties p = adapter.GetIPProperties().GetIPv6Properties();
 
                     if (null == p)
                     {
-                        continue; // IPv4 is not configured on this adapter
+                        continue; // IPv6 is not configured on this adapter
                     }
 
                     selectedInterface = p;
@@ -50,31 +50,23 @@ namespace ColdBear.mDNS
 
                 Console.WriteLine($"Bound to {selectedInterface.ToString()}");
 
-                var ipAddress = "192.168.86.111";
-
-                IPAddress multicastAddress = IPAddress.Parse("224.0.0.251");
+                IPAddress multicastAddress = IPAddress.Parse("FF02::FB");
                 IPEndPoint multicastEndpoint = new IPEndPoint(multicastAddress, 5353);
-                IPAddress localAddress = IPAddress.Parse(ipAddress);
-                EndPoint localEndpoint = new IPEndPoint(localAddress, 5353);
+                EndPoint localEndpoint = new IPEndPoint(IPAddress.IPv6Any, 5353);
+                EndPoint senderRemote = new IPEndPoint(IPAddress.IPv6Any, 0);
 
-                EndPoint senderRemote = new IPEndPoint(IPAddress.Any, 0);
-
-                using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+                using (var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp))
                 {
-                    socket.EnableBroadcast = true;
-                    socket.ExclusiveAddressUse = false;
-                    socket.MulticastLoopback = true;
-                    socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, 1);
-                    socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, (int)IPAddress.HostToNetworkOrder(selectedInterface.Index));
+                    socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                    socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.MulticastInterface, true);
 
                     socket.Bind(localEndpoint);
 
-                    socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(multicastAddress, IPAddress.Any));
+                    socket.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.AddMembership, new IPv6MulticastOption(multicastAddress));
 
                     while (true)
                     {
                         try
-
                         {
                             var buffer = new byte[2048];
                             int numberOfbytesReceived = socket.ReceiveFrom(buffer, ref senderRemote);
@@ -142,7 +134,7 @@ namespace ColdBear.mDNS
                             outputBuffer = AddPtr(outputBuffer, "_hap._tcp.local", "Jarvis._hap._tcp.local");
                             outputBuffer = AddSrv(outputBuffer, "Jarvis._hap._tcp.local", 0, 0, 51826, "Surface.local");
 
-                            outputBuffer = AddARecord(outputBuffer, "Surface.local", "A", ipAddress);
+                            //outputBuffer = AddARecord(outputBuffer, "Surface.local", "A", ipAddress);
 
                             ByteArrayToStringDump(outputBuffer);
 
@@ -163,7 +155,7 @@ namespace ColdBear.mDNS
             {
                 Console.WriteLine(exp.Message);
 
-                if(exp.InnerException != null)
+                if (exp.InnerException != null)
                 {
                     Console.WriteLine(exp.InnerException.Message);
 
