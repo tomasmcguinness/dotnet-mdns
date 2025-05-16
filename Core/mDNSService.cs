@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -72,16 +71,6 @@ namespace Core
                         continue; // IPv4 is not configured on this adapter
                     }
 
-                    //foreach (UnicastIPAddressInformation ip in adapter.GetIPProperties().UnicastAddresses)
-                    //{
-                    //    if (ip.Address.AddressFamily == AddressFamily.InterNetwork && ip.Address.ToString() == localIP)
-                    //    {
-                    //        selectedInterface = p;
-                    //        selectedNic = adapter;  // Return the Network Interface found
-                    //        break;
-                    //    }
-                    //}
-
                     if (adapter.Description == "Hyper-V Virtual Ethernet Adapter #3")
                     {
                         selectedInterface = p;
@@ -131,26 +120,16 @@ namespace Core
                 udpclient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
 
                 int adapterIndex = selectedNic.GetIPProperties().GetIPv4Properties().Index;
+
                 udpclient.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, IPAddress.HostToNetworkOrder(adapterIndex));
-                //udpclient.JoinMulticastGroup(multicastAddress);
                 udpclient.Client.Bind(localEndpoint);
 
                 var multOpt = new MulticastOption(multicastAddress, adapterIndex);
                 udpclient.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, multOpt);
 
-                //socket.ExclusiveAddressUse = false;
-
-                //socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                //socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, (int)IPAddress.HostToNetworkOrder(selectedInterface.Index));
-
-                //socket.Bind(localEndpoint);
-
-                //socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(multicastAddress));
-
                 IPAddress ipAddress = IPAddress.Parse(((IPEndPoint)udpclient.Client.LocalEndPoint).Address.ToString());
 
                 Console.WriteLine("Bound to {0}", ipAddress);
-
 
                 while (true)
                 {
@@ -158,7 +137,7 @@ namespace Core
                     {
                         Console.WriteLine("Waiting for incoming data...");
 
-                        var buffer = new byte[2048];
+                        var buffer = new byte[2028];
                         int numberOfbytesReceived = udpclient.Client.ReceiveFrom(buffer, ref senderRemote);
 
                         var content = new byte[numberOfbytesReceived];
@@ -166,9 +145,11 @@ namespace Core
 
                         var contentSpan = content.AsSpan();
 
+                        var headerBytes = contentSpan.Slice(0, 12).ToArray();
+
                         // Start reading the header.
                         //
-                        var id = BitConverter.ToInt16(contentSpan.Slice(0, 2));
+                        var id = BitConverter.ToUInt16(headerBytes, 0);
 
                         var flags = contentSpan.Slice(2, 1);
 
@@ -234,72 +215,12 @@ namespace Core
                             index += 2;
 
                             var @class = ReadBigEndianUShort(resourceRecordSpan, index);
-                            Console.WriteLine("Class: {0}", ReadBigEndianUShort(resourceRecordSpan, index));
+                            Console.WriteLine("Class: {0}", @class);
                             index += 2;
 
-                            //index += 4;
-                            //Console.WriteLine("TTL: {0} ", name, name.Length);
-                            //var rdLength = ReadBigEndianUShort(resourceRecordSpan, index);
-                            //index += 2;
-                            //Console.WriteLine("RD Length: {0} [{1}]", name, name.Length);
+                            // Question records don't have TTL & RData.
 
-                            //index += rdLength;
-                            //Console.WriteLine("RD Data: {0} [{1}]", name, name.Length);
-
-                            if (type == 12)
-                            {
-                                questions.Add(name);
-                            }
-
-                            resourceRecordsSpanIndex += index;
-                        }
-
-                        for (int i = 0; i < queryAnswerCount; i++)
-                        {
-                            var resourceRecordSpan = resourceRecordsSpan.Slice(resourceRecordsSpanIndex);
-
-                            var index = 0;
-
-                            var nameBuffer = new byte[0];
-
-                            foreach (var b in resourceRecordSpan)
-                            {
-                                nameBuffer = nameBuffer.Concat([b]).ToArray();
-
-                                if (b == 0x00)
-                                {
-                                    break;
-                                }
-                            }
-
-                            var name = Encoding.UTF8.GetString(nameBuffer);
-
-                            //Console.WriteLine("Name: {0} [{1}]", name, name.Length);
-                            index += nameBuffer.Length;
-
-                            var type = ReadBigEndianUShort(resourceRecordSpan, index);
-                            //Console.WriteLine("Type: {0}", type);
-                            index += 2;
-
-                            var @class = ReadBigEndianUShort(resourceRecordSpan, index);
-                            //Console.WriteLine("Class: {0}", ReadBigEndianUShort(resourceRecordSpan, index));
-                            index += 2;
-
-                            if (type == 12)
-                            {
-                                var ttl = ReadBigEndianUInt(resourceRecordSpan, index);
-                                index += 4;
-                                //Console.WriteLine("TTL: {0} ", ttl);
-
-                                var rdLength = ReadBigEndianUShort(resourceRecordSpan, index);
-                                index += 2;
-                                //Console.WriteLine("RD Length: {0}", rdLength);
-
-                                var rdDataBytes = resourceRecordSpan.Slice(index, rdLength);
-                                var rdData = Encoding.UTF8.GetString(rdDataBytes.ToArray());
-                                index += rdLength;
-                                //Console.WriteLine("RD Data: {0}", rdData);
-                            }
+                            questions.Add(name);
 
                             resourceRecordsSpanIndex += index;
                         }
@@ -313,21 +234,17 @@ namespace Core
                         var outputBuffer = new byte[0];
 
                         var reponseId = new byte[2];
-                        var responseHeaderFlags = new byte[2];
-
-                        var bitArray = new BitArray(responseHeaderFlags);
-
-                        // We're using 15 and 10 since the Endianness of this bytes is reversed :)
-                        //
-                        bitArray.Set(15, true); // QR
-                        bitArray.Set(10, true); // AA
-
-                        bitArray.CopyTo(responseHeaderFlags, 0);
+                        var responseHeaderFlags = new byte[2] { 0x84, 0x00 };
 
                         var questionCountBytes = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
-                        var answerCountBytes = BitConverter.GetBytes((ushort)5).Reverse().ToArray();
+                        var answerCountBytes = BitConverter.GetBytes((ushort)2).Reverse().ToArray();
                         var additionalCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
                         var otherCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
+
+                        Dictionary<string, string> values = new Dictionary<string, string>();
+                        values.Add("CM", "1");
+                        values.Add("D", "3840");
+                        values.Add("DN", "C# mDNS Test");
 
                         // Add the header to the output buffer.
                         //
@@ -336,20 +253,14 @@ namespace Core
                         if (questions.Contains("_services._dns-sd._udp.local"))
                         {
                             outputBuffer = AddPtr(outputBuffer, "_services._dns-sd._udp.local", "_matterc._udp.local");
-                            outputBuffer = AddTxt(outputBuffer, $"_services._dns-sd._udp.local", new Dictionary<string, string>());
+                            outputBuffer = AddTxt(outputBuffer, $"_services._dns-sd._udp.local", values);
                         }
 
                         if (questions.Contains("_matterc._udp.local"))
                         {
                             outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
-
                             outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
                             outputBuffer = AddSrv(outputBuffer, $"TOMAS._matterc._udp.local", 0, 0, 51826, hostname);
-
-                            Dictionary<string, string> values = new Dictionary<string, string>();
-                            values.Add("CM", "1");
-                            values.Add("D", "3840");
-                            values.Add("DN", "C# mDNS Test");
 
                             outputBuffer = AddTxt(outputBuffer, $"TOMAS._matterc._udp.local", values);
                             outputBuffer = AddARecord(outputBuffer, $"TOMAS.local", "AAAA", ipAddress.ToString());
@@ -359,7 +270,7 @@ namespace Core
 
                         var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, senderRemote);
 
-                        Console.WriteLine($"Wrote {bytesSent}");
+                        Console.WriteLine($"Send {bytesSent} to {senderRemote}");
                     }
                     catch (Exception exp)
                     {
