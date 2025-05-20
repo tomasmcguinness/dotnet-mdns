@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Net;
 using System.Text;
 
 namespace Core
@@ -16,22 +18,23 @@ namespace Core
 
             var flags = messageSpan.Slice(2, 2);
 
-            //var queryResponseBit = flags..Slice(2, 2);
+            IsQuery = flags[0] == 0x00;
 
-            var isQuery = true; // queryResponseBit == 0x00;
+            // DNS Uses Network Byte Order (Big Endian). C# is Little Endian.
+            //
+            var questionCountBytes = messageSpan.Slice(4, 2).ToArray();
+            var reversedQuestionCountBytes = questionCountBytes.Reverse();
+            var queryQuestionCount = BitConverter.ToUInt16(reversedQuestionCountBytes.ToArray());
 
-            RequestType = isQuery ? RequestType.Query : RequestType.Response;
+            var answerCountBytes = messageSpan.Slice(6, 2).ToArray();
+            var reversedAnswerCountBytes = questionCountBytes.Reverse();
+            var queryAnswerCount = BitConverter.ToUInt16(reversedAnswerCountBytes.ToArray());
 
-            var queryResponseStatus = isQuery ? "Query" : "Response";
+            // Ignore Authority Records (NSCOUNT) and Additional Records (ARCOUNT) for now.
+            //
 
-            var questions = new List<string>();
-
-            var queryQuestionCount = BitConverter.ToUInt16(messageSpan.Slice(4, 2));
-            Console.WriteLine($"QuestionCount: {queryQuestionCount}");
-
-            var queryAnswerCount = BitConverter.ToUInt16(messageSpan.Slice(6, 2));
-            Console.WriteLine($"AnswerCount: {queryAnswerCount}");
-
+            // DNS Header is 12 bytes long.
+            //
             var contentIndex = 12;
 
             for (int i = 0; i < queryQuestionCount; i++)
@@ -62,15 +65,12 @@ namespace Core
                 var nameSpan = questionSpan.Slice(0, nameEndIndex + 1);
 
                 var name = DecodeName(nameSpan, messageSpan);
-                Console.WriteLine("Name: {0} [{1}]", name, name.Length);
                 contentIndex += (nameEndIndex + 1);
 
                 var type = BitConverter.ToUInt16(messageSpan.Slice(contentIndex, 2));
-                //Console.WriteLine("Type: {0}", ConvertTypeToDescription(type));
                 contentIndex += 2;
 
                 var @class = BitConverter.ToUInt16(messageSpan.Slice(contentIndex, 2));
-                //Console.WriteLine("Class: {0}", @class);
                 contentIndex += 2;
 
                 // Question records don't have TTL & RData.
@@ -78,13 +78,15 @@ namespace Core
 
                 // Add the name to the list of questions being asked.
                 //
-                questions.Add(name);
+                Questions.Add(name);
             }
         }
 
-        public ushort Id { get; set; }
+        public ushort Id { get; }
 
-        public RequestType RequestType { get; set; }
+        public bool IsQuery { get; }
+
+        public List<string> Questions { get; } = new List<string>();
 
         private string DecodeName(ReadOnlySpan<byte> nameSpan, ReadOnlySpan<byte> messageSpan)
         {

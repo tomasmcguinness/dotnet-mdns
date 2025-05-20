@@ -143,134 +143,53 @@ namespace Core
 
                         var request = new DNSMessage(content);
 
-                        //var contentSpan = content.AsSpan();
-
-                        //var headerBytes = contentSpan.Slice(0, 12).ToArray();
-
-                        //// Start reading the header.
-                        ////
-                        //var id = BitConverter.ToUInt16(headerBytes, 0);
-
-                        //var flags = contentSpan.Slice(2, 1);
-
-                        //var queryResponseBit = flags[0] >> 7;
-                        //var isQuery = queryResponseBit == 0x00;
-
-                        //if (!isQuery)
-                        //{
-                        //    Console.WriteLine("Not a query. Ignoring.");
-                        //    continue;
-                        //}
-
-                        //var queryResponseStatus = isQuery ? "Query" : "Response";
-
-                        //var questions = new List<string>();
-
-                        //Console.WriteLine("───────────────── START REQUEST ─────────────────");
-                        //Console.WriteLine($"Request received with ID: {id}");
-
-                        //Console.WriteLine($"Id: {id}");
-                        //Console.WriteLine($"Query/Response: {queryResponseStatus}");
-
-                        //var queryQuestionCount = ReadBigEndianUShort(contentSpan, 4); ;
-                        //Console.WriteLine($"QuestionCount: {queryQuestionCount}");
-
-                        //var queryAnswerCount = ReadBigEndianUShort(contentSpan, 6);
-                        //Console.WriteLine($"AnswerCount: {queryAnswerCount}");
-
-                        //ByteArrayToStringDump(content);
-
-                        //var resourceRecordsSpan = contentSpan.Slice(12);
-
-                        //int resourceRecordsSpanIndex = 0;
-
-                        //for (int i = 0; i < queryQuestionCount; i++)
-                        //{
-                        //    var resourceRecordSpan = resourceRecordsSpan.Slice(resourceRecordsSpanIndex);
-
-                        //    var index = 0;
-
-                        //    var nameBuffer = new byte[0];
-
-                        //    // Work through the first few bytes. These represent the name. 
-                        //    // There is a null terminator.
-                        //    //
-                        //    foreach (var b in resourceRecordSpan)
-                        //    {
-                        //        nameBuffer = nameBuffer.Concat([b]).ToArray();
-
-                        //        if (b == 0x00)
-                        //        {
-                        //            break;
-                        //        }
-                        //    }
-
-                        //    var name = DecodeName(nameBuffer);
-
-                        //    Console.WriteLine("Name: {0} [{1}]", name, name.Length);
-                        //    index += nameBuffer.Length;
-
-                        //    var type = ReadBigEndianUShort(resourceRecordSpan, index);
-                        //    Console.WriteLine("Type: {0}", ConvertTypeToDescription(type));
-                        //    index += 2;
-
-                        //    var @class = ReadBigEndianUShort(resourceRecordSpan, index);
-                        //    Console.WriteLine("Class: {0}", @class);
-                        //    index += 2;
-
-                        //    // Question records don't have TTL & RData.
-
-                        //    questions.Add(name);
-
-                        //    resourceRecordsSpanIndex += index;
-                        //}
-
                         //Console.WriteLine("──────────────────── END REQUEST ────────────────────");
 
-                        Console.WriteLine();
+                        if (request.IsQuery)
+                        {
+                            // Build the header that indicates this is a response.
+                            //
+                            var outputBuffer = new byte[0];
 
-                        // Build the header that indicates this is a response.
-                        //
-                        var outputBuffer = new byte[0];
+                            var reponseId = new byte[2];
+                            var responseHeaderFlags = new byte[2] { 0x84, 0x00 };
 
-                        var reponseId = new byte[2];
-                        var responseHeaderFlags = new byte[2] { 0x84, 0x00 };
+                            var questionCountBytes = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
+                            var answerCountBytes = BitConverter.GetBytes((ushort)2).Reverse().ToArray();
+                            var additionalCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
+                            var otherCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
 
-                        var questionCountBytes = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
-                        var answerCountBytes = BitConverter.GetBytes((ushort)2).Reverse().ToArray();
-                        var additionalCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
-                        var otherCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
+                            Dictionary<string, string> values = new Dictionary<string, string>();
+                            values.Add("CM", "1");
+                            values.Add("D", "3840");
+                            values.Add("DN", "C# mDNS Test");
 
-                        Dictionary<string, string> values = new Dictionary<string, string>();
-                        values.Add("CM", "1");
-                        values.Add("D", "3840");
-                        values.Add("DN", "C# mDNS Test");
+                            // Add the header to the output buffer.
+                            //
+                            outputBuffer = outputBuffer.Concat(reponseId).Concat(responseHeaderFlags).Concat(questionCountBytes).Concat(answerCountBytes).Concat(additionalCounts).Concat(otherCounts).ToArray();
 
-                        // Add the header to the output buffer.
-                        //
-                        outputBuffer = outputBuffer.Concat(reponseId).Concat(responseHeaderFlags).Concat(questionCountBytes).Concat(answerCountBytes).Concat(additionalCounts).Concat(otherCounts).ToArray();
+                            if (request.Questions.Contains("_services._dns-sd._udp.local"))
+                            {
+                                outputBuffer = AddPtr(outputBuffer, "_services._dns-sd._udp.local", "_matterc._udp.local");
+                                outputBuffer = AddTxt(outputBuffer, $"_services._dns-sd._udp.local", values);
+                            }
 
-                        //if (request.Questions.Contains("_services._dns-sd._udp.local"))
-                        //{
-                        //    outputBuffer = AddPtr(outputBuffer, "_services._dns-sd._udp.local", "_matterc._udp.local");
-                        //    outputBuffer = AddTxt(outputBuffer, $"_services._dns-sd._udp.local", values);
-                        //}
+                            if (request.Questions.Contains("_matterc._udp.local"))
+                            {
+                                outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
+                                outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
+                                outputBuffer = AddSrv(outputBuffer, $"TOMAS._matterc._udp.local", 0, 0, 51826, hostname);
 
-                        //if (questions.Contains("_matterc._udp.local"))
-                        //{
-                        //    outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
-                        //    outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
-                        //    outputBuffer = AddSrv(outputBuffer, $"TOMAS._matterc._udp.local", 0, 0, 51826, hostname);
+                                outputBuffer = AddTxt(outputBuffer, $"TOMAS._matterc._udp.local", values);
+                                outputBuffer = AddARecord(outputBuffer, $"TOMAS.local", "AAAA", ipAddress.ToString());
+                            }
 
-                        //    outputBuffer = AddTxt(outputBuffer, $"TOMAS._matterc._udp.local", values);
-                        //    outputBuffer = AddARecord(outputBuffer, $"TOMAS.local", "AAAA", ipAddress.ToString());
-                        //}
+                            ByteArrayToStringDump(outputBuffer);
 
-                        ByteArrayToStringDump(outputBuffer);
+                            var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, senderRemote);
 
-                        var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, senderRemote);
-
-                        Console.WriteLine($"Send {bytesSent} to {senderRemote}");
+                            Console.WriteLine($"Send {bytesSent} to {senderRemote}");
+                        }
                     }
                     catch (Exception exp)
                     {
@@ -307,7 +226,7 @@ namespace Core
             }
         }
 
-        
+
 
         private byte[] AddARecord(byte[] outputBuffer, string hostName, string type, string ipAddress)
         {
@@ -521,7 +440,7 @@ namespace Core
             return result.Concat(new byte[1] { 0x00 }).ToArray();
         }
 
-        
+
 
         static string GetLocalIPAddress()
         {
