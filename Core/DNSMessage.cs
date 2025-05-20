@@ -24,7 +24,7 @@ namespace Core
             //
             var questionCountBytes = messageSpan.Slice(4, 2).ToArray();
             var reversedQuestionCountBytes = questionCountBytes.Reverse();
-            var queryQuestionCount = BitConverter.ToUInt16(reversedQuestionCountBytes.ToArray());
+            QueryCount = BitConverter.ToUInt16(reversedQuestionCountBytes.ToArray());
 
             var answerCountBytes = messageSpan.Slice(6, 2).ToArray();
             var reversedAnswerCountBytes = questionCountBytes.Reverse();
@@ -37,7 +37,7 @@ namespace Core
             //
             var contentIndex = 12;
 
-            for (int i = 0; i < queryQuestionCount; i++)
+            for (int i = 0; i < QueryCount; i++)
             {
                 var nameBuffer = new byte[0];
 
@@ -78,7 +78,7 @@ namespace Core
 
                 // Add the name to the list of questions being asked.
                 //
-                Questions.Add(name);
+                Queries.Add(name);
             }
         }
 
@@ -86,7 +86,9 @@ namespace Core
 
         public bool IsQuery { get; }
 
-        public List<string> Questions { get; } = new List<string>();
+        public ushort QueryCount { get; }
+
+        public List<string> Queries { get; } = new List<string>();
 
         private string DecodeName(ReadOnlySpan<byte> nameSpan, ReadOnlySpan<byte> messageSpan)
         {
@@ -118,6 +120,20 @@ namespace Core
             }
 
             return sb.ToString().TrimEnd('.');
+        }
+
+        public override string ToString()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendFormat("Query: {0}", IsQuery);
+            sb.AppendFormat("\nQueryCount: {0}", QueryCount);
+
+            foreach (var query in Queries)
+            {
+                sb.AppendFormat("\n* {0}", query);
+            }
+
+            return sb.ToString();
         }
     }
 }

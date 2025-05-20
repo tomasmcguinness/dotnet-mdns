@@ -143,7 +143,9 @@ namespace Core
 
                         var request = new DNSMessage(content);
 
-                        //Console.WriteLine("──────────────────── END REQUEST ────────────────────");
+                        Console.WriteLine("─────────────────── BEGIN REQUEST ────────────────────");
+                        Console.WriteLine(request);
+                        Console.WriteLine("──────────────────── END REQUEST ────────────────────");
 
                         if (request.IsQuery)
                         {
@@ -168,13 +170,13 @@ namespace Core
                             //
                             outputBuffer = outputBuffer.Concat(reponseId).Concat(responseHeaderFlags).Concat(questionCountBytes).Concat(answerCountBytes).Concat(additionalCounts).Concat(otherCounts).ToArray();
 
-                            if (request.Questions.Contains("_services._dns-sd._udp.local"))
+                            if (request.Queries.Contains("_services._dns-sd._udp.local"))
                             {
                                 outputBuffer = AddPtr(outputBuffer, "_services._dns-sd._udp.local", "_matterc._udp.local");
                                 outputBuffer = AddTxt(outputBuffer, $"_services._dns-sd._udp.local", values);
                             }
 
-                            if (request.Questions.Contains("_matterc._udp.local"))
+                            if (request.Queries.Contains("_matterc._udp.local"))
                             {
                                 outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
                                 outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
@@ -247,23 +249,27 @@ namespace Core
 
             outputBuffer = outputBuffer.Concat(ttl).ToArray();
 
-            var address = ConvertIpAddress(ipAddress);
+            var address = ConvertIPv4Address(ipAddress);
 
             // For IP4, this will be an int32
+            //
             var dataLength = BitConverter.GetBytes((short)address.Length).Reverse().ToArray();
 
             outputBuffer = outputBuffer.Concat(dataLength).ToArray();
 
             outputBuffer = outputBuffer.Concat(address).ToArray();
 
-            //outputBuffer = outputBuffer.Concat(new byte[2] { 0xC0, 0x0C }).ToArray();
-
             return outputBuffer;
         }
 
-        private byte[] ConvertIpAddress(string ipAddress)
+        private byte[] ConvertIPv4Address(string ipAddress)
         {
-            var parts = ipAddress.Split(':');
+            return ConvertIPAddress(ipAddress, '.');
+        }
+
+        private byte[] ConvertIPAddress(string ipAddress, char separator)
+        {
+            var parts = ipAddress.Split(separator);
 
             byte[] result = new byte[4];
 
@@ -283,6 +289,7 @@ namespace Core
 
             return result;
         }
+
 
         private byte[] AddSrv(byte[] outputBuffer, string host, short priority, short weight, int port, string hostname)
         {

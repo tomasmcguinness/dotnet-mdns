@@ -14,10 +14,25 @@ namespace Core.Tests
             var message = new DNSMessage(payload);
 
             Assert.That(message.IsQuery, Is.True);
-            Assert.That(message.Questions.Count, Is.EqualTo(3));
-            Assert.That(message.Questions[0], Is.EqualTo("_airplay-bds._tcp.local"));
-            Assert.That(message.Questions[1], Is.EqualTo("_airplay._tcp.local"));
-            Assert.That(message.Questions[2], Is.EqualTo("_raop._tcp.local"));
+            Assert.That(message.Queries.Count, Is.EqualTo(3));
+            Assert.That(message.Queries[0], Is.EqualTo("_airplay-bds._tcp.local"));
+            Assert.That(message.Queries[1], Is.EqualTo("_airplay._tcp.local"));
+            Assert.That(message.Queries[2], Is.EqualTo("_raop._tcp.local"));
         }
+
+        [Test]
+        public void DNSMessage_RealPayload2()
+        {
+            var payload = Convert.FromHexString("000000000001000000000000255F30303030303030302D303762632D333939382D373866322D353062363037663834316231045F7375620D5F686F6D652D73686172696E67045F746370056C6F63616C00000C8001");
+            var message = new DNSMessage(payload);
+
+            Assert.That(message.IsQuery, Is.True);
+            Assert.That(message.Queries.Count, Is.EqualTo(1));
+            Assert.That(message.Queries[0], Is.EqualTo("_airplay-bds._tcp.local"));
+            Assert.That(message.Queries[1], Is.EqualTo("_airplay._tcp.local"));
+            Assert.That(message.Queries[2], Is.EqualTo("_raop._tcp.local"));
+        }
+
+        
     }
 }
