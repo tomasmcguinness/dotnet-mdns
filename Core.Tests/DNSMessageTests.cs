@@ -33,6 +33,6 @@ namespace Core.Tests
             Assert.That(message.Queries[2], Is.EqualTo("_raop._tcp.local"));
         }
 
-        
+
     }
 }
