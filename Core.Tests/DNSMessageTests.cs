@@ -15,9 +15,9 @@ namespace Core.Tests
 
             Assert.That(message.IsQuery, Is.True);
             Assert.That(message.Queries.Count, Is.EqualTo(3));
-            Assert.That(message.Queries[0], Is.EqualTo("_airplay-bds._tcp.local"));
-            Assert.That(message.Queries[1], Is.EqualTo("_airplay._tcp.local"));
-            Assert.That(message.Queries[2], Is.EqualTo("_raop._tcp.local"));
+            Assert.That(message.Queries[0].Name, Is.EqualTo("_airplay-bds._tcp.local"));
+            Assert.That(message.Queries[1].Name, Is.EqualTo("_airplay._tcp.local"));
+            Assert.That(message.Queries[2].Name, Is.EqualTo("_raop._tcp.local"));
         }
 
         [Test]
@@ -28,9 +28,9 @@ namespace Core.Tests
 
             Assert.That(message.IsQuery, Is.True);
             Assert.That(message.Queries.Count, Is.EqualTo(1));
-            Assert.That(message.Queries[0], Is.EqualTo("_airplay-bds._tcp.local"));
-            Assert.That(message.Queries[1], Is.EqualTo("_airplay._tcp.local"));
-            Assert.That(message.Queries[2], Is.EqualTo("_raop._tcp.local"));
+            Assert.That(message.Queries[0].Name, Is.EqualTo("_airplay-bds._tcp.local"));
+            Assert.That(message.Queries[1].Name, Is.EqualTo("_airplay._tcp.local"));
+            Assert.That(message.Queries[2].Name, Is.EqualTo("_raop._tcp.local"));
         }
 
 

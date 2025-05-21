@@ -6,12 +6,34 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Core
 {
     public class mDNSService
     {
-        public void Start()
+        public delegate void RecordDiscoveredDelegate(object sender, Record record);
+        public event RecordDiscoveredDelegate RecordDiscovered;
+
+        private bool _isThreadRunning = true;
+        private Thread _thread;
+
+        public async Task Perform(Discovery discovery)
+        {
+            var threadStart = new ThreadStart(Start);
+            _thread = new Thread(Start);
+            _thread.Start();
+
+            // Give it 10 seconds to finish. TODO Pass this in as an argument.
+            //
+            await Task.Delay(30000);
+
+            _isThreadRunning = false;
+
+            _thread.Join();
+        }
+
+        private void Start()
         {
             try
             {
@@ -22,8 +44,6 @@ namespace Core
                 NetworkInterface selectedNic = null;
                 //IPv6InterfaceProperties selectedInterface = null;
                 IPv4InterfaceProperties selectedInterface = null;
-
-                var localIP = GetLocalIPAddress();
 
                 foreach (NetworkInterface adapter in nics)
                 {
@@ -129,7 +149,7 @@ namespace Core
 
                 Console.WriteLine("Bound to {0}", ipAddress);
 
-                while (true)
+                while (_isThreadRunning)
                 {
                     try
                     {
@@ -149,42 +169,41 @@ namespace Core
 
                         if (request.IsQuery)
                         {
-                            // Build the header that indicates this is a response.
-                            //
-                            var outputBuffer = new byte[0];
-
-                            var reponseId = new byte[2];
-                            var responseHeaderFlags = new byte[2] { 0x84, 0x00 };
-
-                            var questionCountBytes = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
-                            var answerCountBytes = BitConverter.GetBytes((ushort)2).Reverse().ToArray();
-                            var additionalCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
-                            var otherCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
+                            var responseMessage = new DNSMessage(true);
 
                             Dictionary<string, string> values = new Dictionary<string, string>();
+
+                            if (request.Queries.Any(q => q.Name == "_services._dns-sd._udp.local"))
+                            {
+                                responseMessage.AddAnswer("_services._dns-sd._udp.local", RecordType.PTR, RecordClass.Internet, "_matter._udp.local");
+                                responseMessage.AddAnswer("_services._dns-sd._udp.local", RecordType.TXT, RecordClass.Internet, values);
+                            }
+
+                            // Add pointers and text records.
+                            //
+                            //responseMessage.AddAnswer("_services._dns-sd._udp.local", "service", values);
+
+                            // Build the header that indicates this is a response.
+                            //
+
+                            values = new Dictionary<string, string>();
                             values.Add("CM", "1");
                             values.Add("D", "3840");
                             values.Add("DN", "C# mDNS Test");
 
                             // Add the header to the output buffer.
                             //
-                            outputBuffer = outputBuffer.Concat(reponseId).Concat(responseHeaderFlags).Concat(questionCountBytes).Concat(answerCountBytes).Concat(additionalCounts).Concat(otherCounts).ToArray();
-
-                            if (request.Queries.Contains("_services._dns-sd._udp.local"))
+                            if (request.Queries.Any(q => q.Name == "_matterc._udp.local"))
                             {
-                                outputBuffer = AddPtr(outputBuffer, "_services._dns-sd._udp.local", "_matterc._udp.local");
-                                outputBuffer = AddTxt(outputBuffer, $"_services._dns-sd._udp.local", values);
+                                responseMessage.AddAnswer("_matter._udp.local", RecordType.PTR, RecordClass.Internet, $"TOMAS._matter._udp.local");
+
+                                //outputBuffer = AddPtr(outputBuffer, "_matter._udp.local", $"TOMAS._matter._udp.local");
+                                //outputBuffer = AddSrv(outputBuffer, $"TOMAS._matter._udp.local", 0, 0, 51826, hostname);
+                                //outputBuffer = AddTxt(outputBuffer, $"TOMAS._matter._udp.local", values);
+                                //outputBuffer = AddARecord(outputBuffer, $"TOMAS.local", ipAddress.ToString());
                             }
 
-                            if (request.Queries.Contains("_matterc._udp.local"))
-                            {
-                                outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
-                                outputBuffer = AddPtr(outputBuffer, "_matterc._udp.local", $"TOMAS._matterc._udp.local");
-                                outputBuffer = AddSrv(outputBuffer, $"TOMAS._matterc._udp.local", 0, 0, 51826, hostname);
-
-                                outputBuffer = AddTxt(outputBuffer, $"TOMAS._matterc._udp.local", values);
-                                outputBuffer = AddARecord(outputBuffer, $"TOMAS.local", "AAAA", ipAddress.ToString());
-                            }
+                            var outputBuffer = responseMessage.GetBytes();
 
                             ByteArrayToStringDump(outputBuffer);
 
@@ -192,13 +211,21 @@ namespace Core
 
                             Console.WriteLine($"Send {bytesSent} to {senderRemote}");
                         }
+                        else
+                        {
+                            // Response received.
+                            // 
+                            foreach (var answer in request.Answers)
+                            {
+                                RecordDiscovered?.Invoke(this, answer);
+                            }
+                        }
                     }
                     catch (Exception exp)
                     {
                         Console.WriteLine(exp.Message);
                     }
                 }
-                //}
             }
             catch (Exception exp)
             {
@@ -211,56 +238,37 @@ namespace Core
             }
         }
 
-        private string ConvertTypeToDescription(ushort type)
-        {
-            switch (type)
-            {
-                case 1:
-                    return "A";
-                case 12:
-                    return "PTR";
-                case 16:
-                    return "TXT";
-                case 28:
-                    return "AAAA";
-                default:
-                    return "UNKNOWN";
-            }
-        }
+        //private byte[] AddARecord(byte[] outputBuffer, string hostName, string ipAddress)
+        //{
+        //    var nodeName = EncodeName(hostName);
 
+        //    outputBuffer = outputBuffer.Concat(nodeName).ToArray();
 
+        //    var typeBytes = BitConverter.GetBytes((short)1).Reverse().ToArray(); // A
 
-        private byte[] AddARecord(byte[] outputBuffer, string hostName, string type, string ipAddress)
-        {
-            var nodeName = EncodeName(hostName);
+        //    outputBuffer = outputBuffer.Concat(typeBytes).ToArray();
 
-            outputBuffer = outputBuffer.Concat(nodeName).ToArray();
+        //    var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
+        //    @class[0] = @class[0].SetBit(7); // set flush to true
 
-            var typeBytes = BitConverter.GetBytes((short)1).Reverse().ToArray(); // A
+        //    outputBuffer = outputBuffer.Concat(@class).ToArray();
 
-            outputBuffer = outputBuffer.Concat(typeBytes).ToArray();
+        //    var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
 
-            var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
-            @class[0] = @class[0].SetBit(7); // set flush to true
+        //    outputBuffer = outputBuffer.Concat(ttl).ToArray();
 
-            outputBuffer = outputBuffer.Concat(@class).ToArray();
+        //    var address = ConvertIPv4Address(ipAddress);
 
-            var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
+        //    // For IP4, this will be an int32
+        //    //
+        //    var dataLength = BitConverter.GetBytes((short)address.Length).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(ttl).ToArray();
+        //    outputBuffer = outputBuffer.Concat(dataLength).ToArray();
 
-            var address = ConvertIPv4Address(ipAddress);
+        //    outputBuffer = outputBuffer.Concat(address).ToArray();
 
-            // For IP4, this will be an int32
-            //
-            var dataLength = BitConverter.GetBytes((short)address.Length).Reverse().ToArray();
-
-            outputBuffer = outputBuffer.Concat(dataLength).ToArray();
-
-            outputBuffer = outputBuffer.Concat(address).ToArray();
-
-            return outputBuffer;
-        }
+        //    return outputBuffer;
+        //}
 
         private byte[] ConvertIPv4Address(string ipAddress)
         {
@@ -291,202 +299,132 @@ namespace Core
         }
 
 
-        private byte[] AddSrv(byte[] outputBuffer, string host, short priority, short weight, int port, string hostname)
-        {
-            var nodeName = EncodeName(host);
+        //private byte[] AddSrv(byte[] outputBuffer, string host, short priority, short weight, int port, string hostname)
+        //{
+        //    var nodeName = Utilities.EncodeName(host);
 
-            outputBuffer = outputBuffer.Concat(nodeName).ToArray();
+        //    outputBuffer = outputBuffer.Concat(nodeName).ToArray();
 
-            var type = BitConverter.GetBytes((short)33).Reverse().ToArray(); // SRV
+        //    var type = BitConverter.GetBytes((short)33).Reverse().ToArray(); // SRV
 
-            outputBuffer = outputBuffer.Concat(type).ToArray();
+        //    outputBuffer = outputBuffer.Concat(type).ToArray();
 
-            var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
-            @class[0] = @class[0].SetBit(7); // set flush to true
+        //    var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
+        //    @class[0] = @class[0].SetBit(7); // set flush to true
 
-            outputBuffer = outputBuffer.Concat(@class).ToArray();
+        //    outputBuffer = outputBuffer.Concat(@class).ToArray();
 
-            var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
+        //    var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(ttl).ToArray();
+        //    outputBuffer = outputBuffer.Concat(ttl).ToArray();
 
-            var svrName = EncodeName(hostname);
+        //    var svrName =   EncodeName(hostname);
 
-            int totalLength = svrName.Length + 2 + 2 + 2; // name + priority + weight + port
+        //    int totalLength = svrName.Length + 2 + 2 + 2; // name + priority + weight + port
 
-            var dataLength = BitConverter.GetBytes((short)totalLength).Reverse().ToArray();
+        //    var dataLength = BitConverter.GetBytes((short)totalLength).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(dataLength).ToArray();
+        //    outputBuffer = outputBuffer.Concat(dataLength).ToArray();
 
-            var priorityBytes = BitConverter.GetBytes(priority).Reverse().ToArray();
+        //    var priorityBytes = BitConverter.GetBytes(priority).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(priorityBytes).ToArray();
+        //    outputBuffer = outputBuffer.Concat(priorityBytes).ToArray();
 
-            var weightBytes = BitConverter.GetBytes(weight).Reverse().ToArray();
+        //    var weightBytes = BitConverter.GetBytes(weight).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(weightBytes).ToArray();
+        //    outputBuffer = outputBuffer.Concat(weightBytes).ToArray();
 
-            var portBytes = BitConverter.GetBytes((short)port).Reverse().ToArray();
+        //    var portBytes = BitConverter.GetBytes((short)port).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(portBytes).ToArray();
+        //    outputBuffer = outputBuffer.Concat(portBytes).ToArray();
 
-            outputBuffer = outputBuffer.Concat(svrName).ToArray();
+        //    outputBuffer = outputBuffer.Concat(svrName).ToArray();
 
-            return outputBuffer;
-        }
+        //    return outputBuffer;
+        //}
 
-        private byte[] AddTxt(byte[] outputBuffer, string v, Dictionary<string, string> values)
-        {
-            var nodeName = EncodeName(v);
+        //private byte[] AddTxt(byte[] outputBuffer, string v, Dictionary<string, string> values)
+        //{
+        //    var nodeName = Utilities.EncodeName(v);
 
-            outputBuffer = outputBuffer.Concat(nodeName).ToArray();
+        //    outputBuffer = outputBuffer.Concat(nodeName).ToArray();
 
-            var type = BitConverter.GetBytes((short)16).Reverse().ToArray(); // TXT
+        //    var type = BitConverter.GetBytes((short)16).Reverse().ToArray(); // TXT
 
-            outputBuffer = outputBuffer.Concat(type).ToArray();
+        //    outputBuffer = outputBuffer.Concat(type).ToArray();
 
-            var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
-            @class[0] = @class[0].SetBit(7); // set flush to true
+        //    var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
+        //    @class[0] = @class[0].SetBit(7); // set flush to true
 
-            outputBuffer = outputBuffer.Concat(@class).ToArray();
+        //    outputBuffer = outputBuffer.Concat(@class).ToArray();
 
-            var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
+        //    var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(ttl).ToArray();
+        //    outputBuffer = outputBuffer.Concat(ttl).ToArray();
 
-            var txtRecord = GetTxtRecord(values);
+        //    var txtRecord = GetTxtRecord(values);
 
-            var recordLength = BitConverter.GetBytes((short)txtRecord.Length).Reverse().ToArray();
+        //    var recordLength = BitConverter.GetBytes((short)txtRecord.Length).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(recordLength).ToArray();
+        //    outputBuffer = outputBuffer.Concat(recordLength).ToArray();
 
-            outputBuffer = outputBuffer.Concat(txtRecord).ToArray();
+        //    outputBuffer = outputBuffer.Concat(txtRecord).ToArray();
 
-            return outputBuffer;
-        }
+        //    return outputBuffer;
+        //}
 
-        private byte[] AddPtr(byte[] outputBuffer, string v1, string v2)
-        {
-            var ptrNodeName = EncodeName(v1);
+        //private byte[] AddPtr(byte[] outputBuffer, string v1, string v2)
+        //{
+        //    var ptrNodeName = Utilities.EncodeName(v1);
 
-            outputBuffer = outputBuffer.Concat(ptrNodeName).ToArray();
+        //    outputBuffer = outputBuffer.Concat(ptrNodeName).ToArray();
 
-            var type = BitConverter.GetBytes((ushort)12).Reverse().ToArray(); // PTR
+        //    var type = BitConverter.GetBytes((ushort)12).Reverse().ToArray(); // PTR
 
-            outputBuffer = outputBuffer.Concat(type).ToArray();
+        //    outputBuffer = outputBuffer.Concat(type).ToArray();
 
-            var @class = BitConverter.GetBytes((ushort)1).Reverse().ToArray(); // Internet
+        //    var @class = BitConverter.GetBytes((ushort)1).Reverse().ToArray(); // Internet
 
-            outputBuffer = outputBuffer.Concat(@class).ToArray();
+        //    outputBuffer = outputBuffer.Concat(@class).ToArray();
 
-            var ttl = BitConverter.GetBytes((uint)120).Reverse().ToArray();
+        //    var ttl = BitConverter.GetBytes((uint)120).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(ttl).ToArray();
+        //    outputBuffer = outputBuffer.Concat(ttl).ToArray();
 
-            var ptrServiceName = EncodeName(v2);
+        //    var ptrServiceName = Utilities.EncodeName(v2);
 
-            var recordLength = BitConverter.GetBytes((ushort)ptrServiceName.Length).Reverse().ToArray();
+        //    var recordLength = BitConverter.GetBytes((ushort)ptrServiceName.Length).Reverse().ToArray();
 
-            outputBuffer = outputBuffer.Concat(recordLength).ToArray();
+        //    outputBuffer = outputBuffer.Concat(recordLength).ToArray();
 
-            outputBuffer = outputBuffer.Concat(ptrServiceName).ToArray();
+        //    outputBuffer = outputBuffer.Concat(ptrServiceName).ToArray();
 
-            return outputBuffer;
-        }
+        //    return outputBuffer;
+        //}
 
-        private byte[] GetTxtRecord(Dictionary<string, string> values)
-        {
-            var result = new byte[0];
+        //private byte[] GetTxtRecord(Dictionary<string, string> values)
+        //{
+        //    var result = new byte[0];
 
-            foreach (var keypair in values)
-            {
-                string fullKeyPair = $"{keypair.Key}={keypair.Value}";
-                result = result.Concat(new byte[1] { (byte)fullKeyPair.Length }).Concat(Encoding.UTF8.GetBytes(fullKeyPair)).ToArray();
-            }
+        //    foreach (var keypair in values)
+        //    {
+        //        string fullKeyPair = $"{keypair.Key}={keypair.Value}";
+        //        result = result.Concat(new byte[1] { (byte)fullKeyPair.Length }).Concat(Encoding.UTF8.GetBytes(fullKeyPair)).ToArray();
+        //    }
 
-            return result;
-        }
+        //    return result;
+        //}
 
         public static void ByteArrayToStringDump(byte[] ba)
         {
             StringBuilder hex = new StringBuilder(ba.Length * 2);
 
-            int count = 0;
-
             foreach (byte b in ba)
             {
                 Console.Write(b.ToString("x2"));
-                //Console.Write(" ");
-
-                //count++;
-
-                //if (count % 2 == 0)
-                //{
-                //    Console.Write("  ");
-                //}
             }
 
             Console.Write("\n");
-        }
-
-        private byte[] EncodeName(string v)
-        {
-            var parts = v.Split('.');
-
-            var result = new byte[0];
-
-            foreach (var part in parts)
-            {
-                int length = part.Length;
-                byte lengthByte = Convert.ToByte(length);
-                result = result.Concat([lengthByte]).Concat(Encoding.UTF8.GetBytes(part)).ToArray();
-            }
-
-            // Null terminator.
-            //
-            return result.Concat(new byte[1] { 0x00 }).ToArray();
-        }
-
-
-
-        static string GetLocalIPAddress()
-        {
-            try
-            {
-                using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
-                {
-                    socket.Connect("8.8.8.8", 80); // Connect to google or any other site
-                    return (socket.LocalEndPoint as System.Net.IPEndPoint)?.Address.ToString();
-                }
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-    }
-
-    public static class ByteExtensions
-    {
-        public static bool IsBitSet(this byte b, int pos)
-        {
-            if (pos < 0 || pos > 7)
-                throw new ArgumentOutOfRangeException("pos", "Index must be in the range of 0-7.");
-
-            return (b & (1 << pos)) != 0;
-        }
-
-        public static byte SetBit(this byte b, int pos)
-        {
-            if (pos < 0 || pos > 7)
-                throw new ArgumentOutOfRangeException("pos", "Index must be in the range of 0-7.");
-
-            return (byte)(b | (1 << pos));
-        }
-
-        public static string ToBinaryString(this byte b)
-        {
-            return Convert.ToString(b, 2).PadLeft(8, '0');
         }
     }
 }
