@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-
-namespace Core
+﻿namespace Core
 {
     public class Record
     {
@@ -11,13 +9,10 @@ namespace Core
             Class = @class;
         }
 
-        public Record(string name, RecordType type, RecordClass @class, string value) : this(name, type, @class)
+        public Record(string name, RecordType type, RecordClass @class, uint ttl, byte[] data) : this(name, type, @class)
         {
-            Value = value;
-        }
-
-        public Record(string name, RecordType type, RecordClass @class, Dictionary<string, string> values) : this(name, type, @class)
-        {
+            TTL = ttl;
+            Data = data;
         }
 
         public string Name { get; }
@@ -26,6 +21,8 @@ namespace Core
 
         public RecordClass Class { get; }
 
-        public string? Value { get; }
+        public uint? TTL { get; }
+
+        public byte[]? Data { get; }
     }
 }

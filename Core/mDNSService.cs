@@ -12,19 +12,24 @@ namespace Core
 {
     public class mDNSService
     {
-        public delegate void RecordDiscoveredDelegate(object sender, Record record);
+        public delegate void RecordDiscoveredDelegate(object sender, Record[] record);
         public event RecordDiscoveredDelegate RecordDiscovered;
 
         private bool _isThreadRunning = true;
         private Thread _thread;
 
+        private List<string> _questionsAsked = new List<string>();
+
         public async Task Perform(Discovery discovery)
         {
+            _questionsAsked.Clear();
+            _questionsAsked.Add(discovery.Name);
+
             var threadStart = new ThreadStart(Start);
             _thread = new Thread(Start);
             _thread.Start();
 
-            // Give it 10 seconds to finish. TODO Pass this in as an argument.
+            // Give it time to finish. TODO Pass this in as an argument.
             //
             await Task.Delay(30000);
 
@@ -149,6 +154,22 @@ namespace Core
 
                 Console.WriteLine("Bound to {0}", ipAddress);
 
+                if (_questionsAsked.Any())
+                {
+                    DNSMessage initialQuery = new DNSMessage(false);
+
+                    foreach (var q in _questionsAsked)
+                    {
+                        initialQuery.AddQuery(q, RecordType.PTR, RecordClass.Internet);
+                    }
+
+                    var outputBuffer = initialQuery.GetBytes();
+
+                    var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, multicastEndpoint);
+
+                    Console.WriteLine($"Send Initial Query [{bytesSent}] to [{multicastEndpoint}]");
+                }
+
                 while (_isThreadRunning)
                 {
                     try
@@ -157,6 +178,11 @@ namespace Core
 
                         var buffer = new byte[2028];
                         int numberOfbytesReceived = udpclient.Client.ReceiveFrom(buffer, ref senderRemote);
+
+                        if (senderRemote == localEndpoint)
+                        {
+                            continue;
+                        }
 
                         var content = new byte[numberOfbytesReceived];
                         Array.Copy(buffer, 0, content, 0, numberOfbytesReceived);
@@ -169,41 +195,43 @@ namespace Core
 
                         if (request.IsQuery)
                         {
-                            var responseMessage = new DNSMessage(true);
+                            var response = new DNSMessage(true);
 
+                            // Copy the original queries into the response.
+                            //
+                            foreach (var query in request.Queries)
+                            {
+                                response.Queries.Add(query);
+                            }
+
+                            // Add our answers
+                            //
                             Dictionary<string, string> values = new Dictionary<string, string>();
 
                             if (request.Queries.Any(q => q.Name == "_services._dns-sd._udp.local"))
                             {
-                                responseMessage.AddAnswer("_services._dns-sd._udp.local", RecordType.PTR, RecordClass.Internet, "_matter._udp.local");
-                                responseMessage.AddAnswer("_services._dns-sd._udp.local", RecordType.TXT, RecordClass.Internet, values);
+                                response.AddPointerAnswer("_services._dns-sd._udp.local", "_matter._udp.local");
+                                response.AddTextAnswer("_services._dns-sd._udp.local", values);
                             }
-
-                            // Add pointers and text records.
-                            //
-                            //responseMessage.AddAnswer("_services._dns-sd._udp.local", "service", values);
-
-                            // Build the header that indicates this is a response.
-                            //
-
-                            values = new Dictionary<string, string>();
-                            values.Add("CM", "1");
-                            values.Add("D", "3840");
-                            values.Add("DN", "C# mDNS Test");
 
                             // Add the header to the output buffer.
                             //
                             if (request.Queries.Any(q => q.Name == "_matterc._udp.local"))
                             {
-                                responseMessage.AddAnswer("_matter._udp.local", RecordType.PTR, RecordClass.Internet, $"TOMAS._matter._udp.local");
+                                response.AddPointerAnswer("_matter._udp.local", "TOMAS._matter._udp.local");
 
-                                //outputBuffer = AddPtr(outputBuffer, "_matter._udp.local", $"TOMAS._matter._udp.local");
-                                //outputBuffer = AddSrv(outputBuffer, $"TOMAS._matter._udp.local", 0, 0, 51826, hostname);
-                                //outputBuffer = AddTxt(outputBuffer, $"TOMAS._matter._udp.local", values);
-                                //outputBuffer = AddARecord(outputBuffer, $"TOMAS.local", ipAddress.ToString());
+                                values = new Dictionary<string, string>();
+                                values.Add("CM", "1");
+                                values.Add("D", "3840");
+                                values.Add("DN", "C# mDNS Test");
+
+                                response.AddPointerAnswer("_matter._udp.local", $"TOMAS._matter._udp.local");
+                                response.AddServiceAnswer($"TOMAS._matter._udp.local", 0, 0, 51826, hostname);
+                                response.AddTextAnswer($"TOMAS._matter._udp.local", values);
+                                response.AddARecordAnswer($"TOMAS.local", ipAddress);
                             }
 
-                            var outputBuffer = responseMessage.GetBytes();
+                            var outputBuffer = response.GetBytes();
 
                             ByteArrayToStringDump(outputBuffer);
 
@@ -214,10 +242,14 @@ namespace Core
                         else
                         {
                             // Response received.
+                            // Check if this response includes the questions we asked.
                             // 
-                            foreach (var answer in request.Answers)
+                            var firstQuestion = _questionsAsked.First();
+
+                            if (request.Queries.Any(q => q.Name == firstQuestion))
                             {
-                                RecordDiscovered?.Invoke(this, answer);
+                                Console.WriteLine($"Response with query {firstQuestion} was received");
+                                RecordDiscovered?.Invoke(this, request.Answers.ToArray());
                             }
                         }
                     }
@@ -402,18 +434,7 @@ namespace Core
         //    return outputBuffer;
         //}
 
-        //private byte[] GetTxtRecord(Dictionary<string, string> values)
-        //{
-        //    var result = new byte[0];
 
-        //    foreach (var keypair in values)
-        //    {
-        //        string fullKeyPair = $"{keypair.Key}={keypair.Value}";
-        //        result = result.Concat(new byte[1] { (byte)fullKeyPair.Length }).Concat(Encoding.UTF8.GetBytes(fullKeyPair)).ToArray();
-        //    }
-
-        //    return result;
-        //}
 
         public static void ByteArrayToStringDump(byte[] ba)
         {

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text;
 
 namespace Core
@@ -46,31 +47,35 @@ namespace Core
                 //
                 var questionSpan = messageSpan.Slice(contentIndex);
 
-                int nameEndIndex = 0;
+                int nameLength = 0;
 
                 for (int x = 0; x < 63; x++)
                 {
                     if (questionSpan[x] == 0x00)
                     {
-                        nameEndIndex = x;
+                        nameLength = x + 1; // Add one to account for the loop starting at 0.
                         break;
                     }
                     else if (questionSpan[x] == 0xC0)
                     {
-                        nameEndIndex = x + 1; // Include the offset byte.
+                        nameLength = x + 2; // Include the offset byte.
                         break;
                     }
                 }
 
-                var nameSpan = questionSpan.Slice(0, nameEndIndex + 1);
+                var nameSpan = questionSpan.Slice(0, nameLength);
 
                 var name = DecodeName(nameSpan, messageSpan);
-                contentIndex += (nameEndIndex + 1);
+                contentIndex += nameLength;
 
-                var type = (RecordType)BitConverter.ToUInt16(messageSpan.Slice(contentIndex, 2));
+                var typeBytes = messageSpan.Slice(contentIndex, 2).ToArray();
+                var reversedTypeBytes = typeBytes.Reverse();
+                var type = (RecordType)BitConverter.ToUInt16(reversedTypeBytes.ToArray());
                 contentIndex += 2;
 
-                var @class = (RecordClass)BitConverter.ToUInt16(messageSpan.Slice(contentIndex, 2));
+                var classBytes = messageSpan.Slice(contentIndex, 2).ToArray();
+                var classBytesReversed = classBytes.Reverse();
+                var @class = (RecordClass)BitConverter.ToUInt16(classBytesReversed.ToArray());
                 contentIndex += 2;
 
                 // Query records don't have TTL & RData.
@@ -90,43 +95,53 @@ namespace Core
                 //
                 var questionSpan = messageSpan.Slice(contentIndex);
 
-                int nameEndIndex = 0;
+                int nameLength = 0;
 
                 for (int x = 0; x < 63; x++)
                 {
                     if (questionSpan[x] == 0x00)
                     {
-                        nameEndIndex = x;
+                        nameLength = x + 1;
                         break;
                     }
                     else if (questionSpan[x] == 0xC0)
                     {
-                        nameEndIndex = x + 1; // Include the offset byte.
+                        nameLength = x + 2; // Include the offset byte.
                         break;
                     }
                 }
 
-                var nameSpan = questionSpan.Slice(0, nameEndIndex + 1);
+                var nameSpan = questionSpan.Slice(0, nameLength);
 
                 var name = DecodeName(nameSpan, messageSpan);
-                contentIndex += (nameEndIndex + 1);
+                contentIndex += nameLength;
 
-                var type = (RecordType)BitConverter.ToUInt16(messageSpan.Slice(contentIndex, 2));
+                var typeBytes = messageSpan.Slice(contentIndex, 2).ToArray();
+                var reversedTypeBytes = typeBytes.Reverse();
+                var type = (RecordType)BitConverter.ToUInt16(reversedTypeBytes.ToArray());
                 contentIndex += 2;
 
-                var @class = (RecordClass)BitConverter.ToUInt16(messageSpan.Slice(contentIndex, 2));
+                var classBytes = messageSpan.Slice(contentIndex, 2).ToArray();
+                var classBytesReversed = classBytes.Reverse();
+                var @class = (RecordClass)BitConverter.ToUInt16(classBytesReversed.ToArray());
                 contentIndex += 2;
 
-                var ttl = (RecordClass)BitConverter.ToUInt16(messageSpan.Slice(contentIndex, 2));
+                var ttlBytes = messageSpan.Slice(contentIndex, 4).ToArray();
+                var ttlBytesReversed = ttlBytes.Reverse();
+                var ttl = BitConverter.ToUInt32(ttlBytesReversed.ToArray());
+                contentIndex += 4;
+
+                var rdDataLengthBytes = messageSpan.Slice(contentIndex, 2).ToArray();
+                var rdDataLengthBytesReversed = rdDataLengthBytes.Reverse();
+                var rdDataLength = BitConverter.ToUInt16(rdDataLengthBytesReversed.ToArray());
                 contentIndex += 2;
 
-                var rdDataLength = BitConverter.ToUInt16(messageSpan.Slice(contentIndex, 2));
-
+                var rdDataBytes = messageSpan.Slice(contentIndex, rdDataLength).ToArray();
                 contentIndex += rdDataLength;
 
-                // Add this record to the list of questions being asked.
+                // Add this record to the list of answers.
                 //
-                Answers.Add(new Record(name, type, @class));
+                Answers.Add(new Record(name, type, @class, ttl, rdDataBytes));
             }
         }
 
@@ -147,19 +162,34 @@ namespace Core
 
         public List<Record> Answers { get; } = [];
 
-        public void AddAnswer(string name, RecordType type, RecordClass @class, string value)
+        public void AddAnswer(string name, RecordType type, RecordClass @class, byte[] data)
         {
-            Answers.Add(new Record(name, type, @class, value));
+            Answers.Add(new Record(name, type, @class, 120, data));
         }
 
-        public void AddAnswer(string name, RecordType type, RecordClass @class, Dictionary<string, string> values)
+        public void AddQuery(string name, RecordType type, RecordClass @class)
         {
-            Answers.Add(new Record(name, type, @class, values));
+            Queries.Add(new Record(name, type, @class));
         }
 
-        public void AddQuery(string v, string v1)
+        public void AddPointerAnswer(string name, string value)
         {
-            // TODO 
+            AddAnswer(name, RecordType.PTR, RecordClass.Internet, EncodeName(value));
+        }
+
+        public void AddTextAnswer(string name, Dictionary<string, string> values)
+        {
+            AddAnswer(name, RecordType.TXT, RecordClass.Internet, EncodeTextValues(values));
+        }
+
+        public void AddServiceAnswer(string name, ushort priority, ushort weight, ushort port, string hostname)
+        {
+            AddAnswer(name, RecordType.SRV, RecordClass.Internet, EncodeService(priority, weight, port, hostname));
+        }
+
+        public void AddARecordAnswer(string name, IPAddress ipAddress)
+        {
+            AddAnswer(name, RecordType.A, RecordClass.Internet, EncodeIPv4Address(ipAddress));
         }
 
         public byte[] GetBytes()
@@ -173,18 +203,26 @@ namespace Core
             var responseHeaderFlags = new byte[2] { IsQuery ? (byte)0x00 : (byte)0x84, 0x00 };
             writer.Write(responseHeaderFlags);
 
-            var questionCountBytes = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
-            writer.Write(questionCountBytes);
+            var queryCountBytes = BitConverter.GetBytes((ushort)QueryCount).Reverse().ToArray();
+            writer.Write(queryCountBytes);
+
             var answerCountBytes = BitConverter.GetBytes((ushort)AnswerCount).Reverse().ToArray();
             writer.Write(answerCountBytes);
+
             var additionalCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
             writer.Write(additionalCounts);
+
             var otherCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
             writer.Write(otherCounts);
 
             foreach (var answer in Answers)
             {
                 SerializeRecord(writer, answer);
+            }
+
+            foreach (var query in Queries)
+            {
+                SerializeRecord(writer, query);
             }
 
             writer.Flush();
@@ -195,12 +233,20 @@ namespace Core
         public override string ToString()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendFormat("Query: {0}", IsQuery);
+            sb.AppendFormat("Type: {0}", IsQuery ? "Query" : "Response");
+
             sb.AppendFormat("\nQueryCount: {0}", QueryCount);
 
             foreach (var query in Queries)
             {
-                sb.AppendFormat("\n* {0}", query);
+                sb.AppendFormat("\n* {0}", query.Name);
+            }
+
+            sb.AppendFormat("\nAnswerCount: {0}", AnswerCount);
+
+            foreach (var answer in Answers)
+            {
+                sb.AppendFormat("\n* {0}", answer.Name);
             }
 
             return sb.ToString();
@@ -222,9 +268,10 @@ namespace Core
             writer.Write(ttl);
 
             // Set the RDData
-            if (record.Type == RecordType.PTR)
+            //
+            if (record.Data is not null)
             {
-                var ptrServiceName = EncodeName(record.Value);
+                var ptrServiceName = record.Data;
 
                 var recordLength = BitConverter.GetBytes((ushort)ptrServiceName.Length).Reverse().ToArray();
 
@@ -324,6 +371,73 @@ namespace Core
             }
 
             return sb.ToString().TrimEnd('.');
+        }
+
+        private byte[] EncodeTextValues(Dictionary<string, string> values)
+        {
+            var result = new byte[0];
+
+            foreach (var keypair in values)
+            {
+                string fullKeyPair = $"{keypair.Key}={keypair.Value}";
+                result = result.Concat(new byte[1] { (byte)fullKeyPair.Length }).Concat(Encoding.UTF8.GetBytes(fullKeyPair)).ToArray();
+            }
+
+            return result;
+        }
+
+        private byte[] EncodeIPv4Address(IPAddress ipAddress)
+        {
+            return EncodeIPAddress(ipAddress.ToString(), '.');
+        }
+
+        private byte[] EncodeIPAddress(string ipAddress, char separator)
+        {
+            var parts = ipAddress.Split(separator);
+
+            byte[] result = new byte[4];
+
+            int index = 0;
+
+            foreach (var part in parts)
+            {
+                if (string.IsNullOrEmpty(part))
+                {
+                    result[index++] = 0x00;
+                }
+                else
+                {
+                    result[index++] = byte.Parse(part);
+                }
+            }
+
+            return result;
+        }
+
+        private byte[] EncodeService(ushort priority, ushort weight, ushort port, string hostname)
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms);
+
+            var serviceName = EncodeName(hostname);
+
+            int totalLength = serviceName.Length + 2 + 2 + 2; // name + priority + weight + port
+
+            var dataLength = BitConverter.GetBytes((short)totalLength).Reverse().ToArray();
+            writer.Write(dataLength);
+
+            var priorityBytes = BitConverter.GetBytes(priority).Reverse().ToArray();
+            writer.Write(priorityBytes);
+
+            var weightBytes = BitConverter.GetBytes(weight).Reverse().ToArray();
+            writer.Write(weightBytes);
+
+            var portBytes = BitConverter.GetBytes((short)port).Reverse().ToArray();
+            writer.Write(portBytes);
+
+            writer.Write(serviceName);
+
+            return ms.ToArray();
         }
     }
 }

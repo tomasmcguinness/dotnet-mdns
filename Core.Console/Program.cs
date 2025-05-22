@@ -2,10 +2,12 @@
 
 mDNSService service = new mDNSService();
 
-service.RecordDiscovered += (object sender, Record record) =>
+service.RecordDiscovered += (object sender, Record[] records) =>
 {
-    Console.WriteLine("Found {0}", record.Name);
+    foreach (Record record in records)
+    {
+        Console.WriteLine("Found {0}", record.Name);
+    }
 };
 
-
-await service.Perform(new Discovery("_matter._tcp.local"));
+await service.Perform(new Discovery("D5096097147FB61E-ABABABAB00010001._matter._tcp.local"));
