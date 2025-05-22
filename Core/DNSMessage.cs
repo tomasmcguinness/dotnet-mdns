@@ -277,50 +277,11 @@ namespace Core
 
                 writer.Write(recordLength);
 
-                writer.Write(ptrServiceName);
+                if (ptrServiceName.Length > 0)
+                {
+                    writer.Write(ptrServiceName);
+                }
             }
-        }
-
-        private byte[] AddPtr(byte[] outputBuffer, string name, string v2)
-        {
-            var ptrNodeName = EncodeName(name);
-
-            outputBuffer = outputBuffer.Concat(ptrNodeName).ToArray();
-
-            var type = BitConverter.GetBytes((ushort)12).Reverse().ToArray(); // PTR
-
-            outputBuffer = outputBuffer.Concat(type).ToArray();
-
-            var @class = BitConverter.GetBytes((ushort)1).Reverse().ToArray(); // Internet
-
-            outputBuffer = outputBuffer.Concat(@class).ToArray();
-
-            var ttl = BitConverter.GetBytes((uint)120).Reverse().ToArray();
-
-            outputBuffer = outputBuffer.Concat(ttl).ToArray();
-
-            var ptrServiceName = EncodeName(v2);
-
-            var recordLength = BitConverter.GetBytes((ushort)ptrServiceName.Length).Reverse().ToArray();
-
-            outputBuffer = outputBuffer.Concat(recordLength).ToArray();
-
-            outputBuffer = outputBuffer.Concat(ptrServiceName).ToArray();
-
-            return outputBuffer;
-        }
-
-        private byte[] GetTxtRecord(Dictionary<string, string> values)
-        {
-            var result = new byte[0];
-
-            foreach (var keypair in values)
-            {
-                string fullKeyPair = $"{keypair.Key}={keypair.Value}";
-                result = result.Concat(new byte[1] { (byte)fullKeyPair.Length }).Concat(Encoding.UTF8.GetBytes(fullKeyPair)).ToArray();
-            }
-
-            return result;
         }
 
         private static byte[] EncodeName(string name)
@@ -423,7 +384,7 @@ namespace Core
 
             int totalLength = serviceName.Length + 2 + 2 + 2; // name + priority + weight + port
 
-            var dataLength = BitConverter.GetBytes((short)totalLength).Reverse().ToArray();
+            var dataLength = BitConverter.GetBytes((ushort)totalLength).Reverse().ToArray();
             writer.Write(dataLength);
 
             var priorityBytes = BitConverter.GetBytes(priority).Reverse().ToArray();
@@ -432,10 +393,10 @@ namespace Core
             var weightBytes = BitConverter.GetBytes(weight).Reverse().ToArray();
             writer.Write(weightBytes);
 
-            var portBytes = BitConverter.GetBytes((short)port).Reverse().ToArray();
+            var portBytes = BitConverter.GetBytes(port).Reverse().ToArray();
             writer.Write(portBytes);
 
-            writer.Write(serviceName);
+            writer.Write(serviceName.ToArray());
 
             return ms.ToArray();
         }

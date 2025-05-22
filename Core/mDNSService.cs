@@ -19,11 +19,30 @@ namespace Core
         private Thread _thread;
 
         private List<string> _questionsAsked = new List<string>();
+        private Dictionary<string, int> _advertisingNames = new Dictionary<string, int>();
 
         public async Task Perform(Discovery discovery)
         {
             _questionsAsked.Clear();
             _questionsAsked.Add(discovery.Name);
+
+            var threadStart = new ThreadStart(Start);
+            _thread = new Thread(Start);
+            _thread.Start();
+
+            // Give it time to finish. TODO Pass this in as an argument.
+            //
+            await Task.Delay(30000);
+
+            _isThreadRunning = false;
+
+            _thread.Join();
+        }
+
+        public async Task Perform(Advertising discovery)
+        {
+            _advertisingNames.Clear();
+            _advertisingNames.Add(discovery.Name, discovery.Port);
 
             var threadStart = new ThreadStart(Start);
             _thread = new Thread(Start);
@@ -96,7 +115,7 @@ namespace Core
                         continue; // IPv4 is not configured on this adapter
                     }
 
-                    if (adapter.Description == "Hyper-V Virtual Ethernet Adapter #3")
+                    if (adapter.Description == "Hyper-V Virtual Ethernet Adapter #2")
                     {
                         selectedInterface = p;
                         selectedNic = adapter;
@@ -179,6 +198,8 @@ namespace Core
                         var buffer = new byte[2028];
                         int numberOfbytesReceived = udpclient.Client.ReceiveFrom(buffer, ref senderRemote);
 
+                        // Ignore questions from ourselves.
+                        //
                         if (senderRemote == localEndpoint)
                         {
                             continue;
@@ -197,37 +218,31 @@ namespace Core
                         {
                             var response = new DNSMessage(true);
 
-                            // Copy the original queries into the response.
-                            //
-                            foreach (var query in request.Queries)
-                            {
-                                response.Queries.Add(query);
-                            }
-
                             // Add our answers
                             //
                             Dictionary<string, string> values = new Dictionary<string, string>();
 
                             if (request.Queries.Any(q => q.Name == "_services._dns-sd._udp.local"))
                             {
-                                response.AddPointerAnswer("_services._dns-sd._udp.local", "_matter._udp.local");
+                                response.AddPointerAnswer("_services._dns-sd._udp.local", "_matter._tcp.local");
                                 response.AddTextAnswer("_services._dns-sd._udp.local", values);
                             }
 
                             // Add the header to the output buffer.
                             //
-                            if (request.Queries.Any(q => q.Name == "_matterc._udp.local"))
+                            //if (request.Queries.Any(q => _advertisingNames.ContainsKey(q.Name)))
+                            if (request.Queries.Any(q => q.Name == "_matter._tcp.local"))
                             {
-                                response.AddPointerAnswer("_matter._udp.local", "TOMAS._matter._udp.local");
+                                response.AddPointerAnswer("_matter._tcp.local", "TOMAS._matter._tcp.local");
+
+                                response.AddServiceAnswer($"TOMAS._matter._tcp.local", 0, 0, 51826, hostname);
 
                                 values = new Dictionary<string, string>();
                                 values.Add("CM", "1");
                                 values.Add("D", "3840");
                                 values.Add("DN", "C# mDNS Test");
 
-                                response.AddPointerAnswer("_matter._udp.local", $"TOMAS._matter._udp.local");
-                                response.AddServiceAnswer($"TOMAS._matter._udp.local", 0, 0, 51826, hostname);
-                                response.AddTextAnswer($"TOMAS._matter._udp.local", values);
+                                response.AddTextAnswer($"TOMAS._matter._tcp.local", values);
                                 response.AddARecordAnswer($"TOMAS.local", ipAddress);
                             }
 
@@ -241,15 +256,17 @@ namespace Core
                         }
                         else
                         {
-                            // Response received.
-                            // Check if this response includes the questions we asked.
+                            // Response received. Look through the answers to see if they match the query we sent.
                             // 
-                            var firstQuestion = _questionsAsked.First();
+                            var firstQuestion = _questionsAsked.FirstOrDefault();
 
-                            if (request.Queries.Any(q => q.Name == firstQuestion))
+                            if (firstQuestion != null)
                             {
-                                Console.WriteLine($"Response with query {firstQuestion} was received");
-                                RecordDiscovered?.Invoke(this, request.Answers.ToArray());
+                                if (request.Answers.Any(q => q.Name == firstQuestion))
+                                {
+                                    Console.WriteLine($"Response to query {firstQuestion} was received");
+                                    RecordDiscovered?.Invoke(this, request.Answers.ToArray());
+                                }
                             }
                         }
                     }
