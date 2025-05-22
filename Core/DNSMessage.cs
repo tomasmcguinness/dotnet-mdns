@@ -49,7 +49,7 @@ namespace Core
 
                 int nameLength = 0;
 
-                for (int x = 0; x < 63; x++)
+                for (int x = 0; x < 255; x++)
                 {
                     if (questionSpan[x] == 0x00)
                     {
@@ -97,7 +97,7 @@ namespace Core
 
                 int nameLength = 0;
 
-                for (int x = 0; x < 63; x++)
+                for (int x = 0; x < 255; x++)
                 {
                     if (questionSpan[x] == 0x00)
                     {

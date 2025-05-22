@@ -10,4 +10,5 @@ service.RecordDiscovered += (object sender, Record[] records) =>
     }
 };
 
-await service.Perform(new Discovery("D5096097147FB61E-ABABABAB00010001._matter._tcp.local"));
+//await service.Perform(new Discovery("D5096097147FB61E-ABABABAB00010001._matter._tcp.local"));
+await service.Perform(new Discovery("_http._tcp.local"));
