@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Text;
 
 namespace Core
@@ -56,7 +55,9 @@ namespace Core
                         nameLength = x + 1; // Add one to account for the loop starting at 0.
                         break;
                     }
-                    else if (questionSpan[x] == 0xC0)
+                    // If this starts with a 11, it means it's a pointer.
+                    //
+                    else if ((0x3F & questionSpan[x]) == 0)
                     {
                         nameLength = x + 2; // Include the offset byte.
                         break;
@@ -104,7 +105,7 @@ namespace Core
                         nameLength = x + 1;
                         break;
                     }
-                    else if (questionSpan[x] == 0xC0)
+                    else if (questionSpan[x] == 0xC0 || questionSpan[x] == 0xC1)
                     {
                         nameLength = x + 2; // Include the offset byte.
                         break;
@@ -158,39 +159,13 @@ namespace Core
 
         public ushort AnswerCount => (ushort)Answers.Count;
 
+        public ushort AdditionalInformationCount => (ushort)AdditionalInformation.Count;
+
         public List<Record> Queries { get; } = [];
 
         public List<Record> Answers { get; } = [];
 
-        public void AddAnswer(string name, RecordType type, RecordClass @class, byte[] data)
-        {
-            Answers.Add(new Record(name, type, @class, 120, data));
-        }
-
-        public void AddQuery(string name, RecordType type, RecordClass @class)
-        {
-            Queries.Add(new Record(name, type, @class));
-        }
-
-        public void AddPointerAnswer(string name, string value)
-        {
-            AddAnswer(name, RecordType.PTR, RecordClass.Internet, EncodeName(value));
-        }
-
-        public void AddTextAnswer(string name, Dictionary<string, string> values)
-        {
-            AddAnswer(name, RecordType.TXT, RecordClass.Internet, EncodeTextValues(values));
-        }
-
-        public void AddServiceAnswer(string name, ushort priority, ushort weight, ushort port, string hostname)
-        {
-            AddAnswer(name, RecordType.SRV, RecordClass.Internet, EncodeService(priority, weight, port, hostname));
-        }
-
-        public void AddARecordAnswer(string name, IPAddress ipAddress)
-        {
-            AddAnswer(name, RecordType.A, RecordClass.Internet, EncodeIPv4Address(ipAddress));
-        }
+        public List<Record> AdditionalInformation { get; } = [];
 
         public byte[] GetBytes()
         {
@@ -209,11 +184,11 @@ namespace Core
             var answerCountBytes = BitConverter.GetBytes((ushort)AnswerCount).Reverse().ToArray();
             writer.Write(answerCountBytes);
 
-            var additionalCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
-            writer.Write(additionalCounts);
+            var authorityCountBytes = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
+            writer.Write(authorityCountBytes);
 
-            var otherCounts = BitConverter.GetBytes((ushort)0).Reverse().ToArray();
-            writer.Write(otherCounts);
+            var additionalInformationCountBytes = BitConverter.GetBytes(AdditionalInformationCount).Reverse().ToArray();
+            writer.Write(additionalInformationCountBytes);
 
             foreach (var answer in Answers)
             {
@@ -221,6 +196,11 @@ namespace Core
             }
 
             foreach (var query in Queries)
+            {
+                SerializeRecord(writer, query);
+            }
+
+            foreach (var query in AdditionalInformation)
             {
                 SerializeRecord(writer, query);
             }
@@ -237,16 +217,23 @@ namespace Core
 
             sb.AppendFormat("\nQueryCount: {0}", QueryCount);
 
-            foreach (var query in Queries)
+            foreach (var record in Queries)
             {
-                sb.AppendFormat("\n* {0}", query.Name);
+                sb.AppendFormat("\n* {0} {1}", record.Name, record.Type);
             }
 
             sb.AppendFormat("\nAnswerCount: {0}", AnswerCount);
 
-            foreach (var answer in Answers)
+            foreach (var record in Answers)
             {
-                sb.AppendFormat("\n* {0}", answer.Name);
+                sb.AppendFormat("\n* {0} {1}", record.Name, record.Type);
+            }
+
+            sb.AppendFormat("\nAdditionalInformationCount: {0}", AdditionalInformationCount);
+
+            foreach (var record in AdditionalInformation)
+            {
+                sb.AppendFormat("\n* {0} {1}", record.Name, record.Type);
             }
 
             return sb.ToString();
@@ -254,8 +241,7 @@ namespace Core
 
         private void SerializeRecord(BinaryWriter writer, Record record)
         {
-            var ptrNodeName = EncodeName(record.Name);
-
+            var ptrNodeName = Serialization.EncodeName(record.Name);
             writer.Write(ptrNodeName);
 
             var type = BitConverter.GetBytes((ushort)record.Type).Reverse().ToArray();
@@ -271,35 +257,17 @@ namespace Core
             //
             if (record.Data is not null)
             {
-                var ptrServiceName = record.Data;
+                var recordData = record.Data;
 
-                var recordLength = BitConverter.GetBytes((ushort)ptrServiceName.Length).Reverse().ToArray();
+                var recordLength = BitConverter.GetBytes((ushort)recordData.Length).Reverse().ToArray();
 
                 writer.Write(recordLength);
 
-                if (ptrServiceName.Length > 0)
+                if (recordData.Length > 0)
                 {
-                    writer.Write(ptrServiceName);
+                    writer.Write(recordData);
                 }
             }
-        }
-
-        private static byte[] EncodeName(string name)
-        {
-            var parts = name.Split('.');
-
-            var result = new byte[0];
-
-            foreach (var part in parts)
-            {
-                int length = part.Length;
-                byte lengthByte = Convert.ToByte(length);
-                result = result.Concat([lengthByte]).Concat(Encoding.UTF8.GetBytes(part)).ToArray();
-            }
-
-            // Null terminator.
-            //
-            return result.Concat(new byte[1] { 0x00 }).ToArray();
         }
 
         private string DecodeName(ReadOnlySpan<byte> nameSpan, ReadOnlySpan<byte> messageSpan)
@@ -314,7 +282,9 @@ namespace Core
                 {
                     break;
                 }
-                else if (length == 0xC0)
+                // If this starts with a 11, it means it's a pointer.
+                //
+                else if ((0x3F & length) == 0)
                 {
                     var offset = nameSpan[i + 1];
 
@@ -333,72 +303,38 @@ namespace Core
 
             return sb.ToString().TrimEnd('.');
         }
+    }
 
-        private byte[] EncodeTextValues(Dictionary<string, string> values)
+    public static class DNSMessageExtensions
+    {
+        private static void AddRecord(List<Record> records, string name, RecordType type, RecordClass @class, byte[]? data)
         {
-            var result = new byte[0];
-
-            foreach (var keypair in values)
-            {
-                string fullKeyPair = $"{keypair.Key}={keypair.Value}";
-                result = result.Concat(new byte[1] { (byte)fullKeyPair.Length }).Concat(Encoding.UTF8.GetBytes(fullKeyPair)).ToArray();
-            }
-
-            return result;
+            records.Add(new Record(name, type, @class, 120, data!));
         }
 
-        private byte[] EncodeIPv4Address(IPAddress ipAddress)
+        public static void AddPointer(this List<Record> records, string name)
         {
-            return EncodeIPAddress(ipAddress.ToString(), '.');
+            AddRecord(records, name, RecordType.PTR, RecordClass.Internet, null);
         }
 
-        private byte[] EncodeIPAddress(string ipAddress, char separator)
+        public static void AddPointer(this List<Record> records, string name, string value)
         {
-            var parts = ipAddress.Split(separator);
-
-            byte[] result = new byte[4];
-
-            int index = 0;
-
-            foreach (var part in parts)
-            {
-                if (string.IsNullOrEmpty(part))
-                {
-                    result[index++] = 0x00;
-                }
-                else
-                {
-                    result[index++] = byte.Parse(part);
-                }
-            }
-
-            return result;
+            AddRecord(records, name, RecordType.PTR, RecordClass.Internet, Serialization.EncodeName(value));
         }
 
-        private byte[] EncodeService(ushort priority, ushort weight, ushort port, string hostname)
+        public static void AddText(this List<Record> records, string name, Dictionary<string, string> values)
         {
-            using var ms = new MemoryStream();
-            using var writer = new BinaryWriter(ms);
+            AddRecord(records, name, RecordType.TXT, RecordClass.Internet, Serialization.EncodeTextValues(values));
+        }
 
-            var serviceName = EncodeName(hostname);
+        public static void AddService(this List<Record> records, string name, ushort priority, ushort weight, ushort port, string hostname)
+        {
+            AddRecord(records, name, RecordType.SRV, RecordClass.Internet, Serialization.EncodeService(priority, weight, port, hostname));
+        }
 
-            int totalLength = serviceName.Length + 2 + 2 + 2; // name + priority + weight + port
-
-            var dataLength = BitConverter.GetBytes((ushort)totalLength).Reverse().ToArray();
-            writer.Write(dataLength);
-
-            var priorityBytes = BitConverter.GetBytes(priority).Reverse().ToArray();
-            writer.Write(priorityBytes);
-
-            var weightBytes = BitConverter.GetBytes(weight).Reverse().ToArray();
-            writer.Write(weightBytes);
-
-            var portBytes = BitConverter.GetBytes(port).Reverse().ToArray();
-            writer.Write(portBytes);
-
-            writer.Write(serviceName.ToArray());
-
-            return ms.ToArray();
+        public static void AddARecord(this List<Record> records, string name, string ipAddress)
+        {
+            AddRecord(records, name, RecordType.A, RecordClass.Internet, Serialization.EncodeIPv4Address(ipAddress));
         }
     }
 }

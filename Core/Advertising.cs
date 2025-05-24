@@ -2,14 +2,11 @@
 {
     public class Advertising
     {
-        public Advertising(string name, int port)
+        public Advertising(params ServiceDetails[] services)
         {
-            Name = name;
-            Port = port;
+            Services = services;
         }
 
-        public string Name { get; }
-
-        public int Port { get; }
+        public ServiceDetails[] Services { get; }
     }
 }

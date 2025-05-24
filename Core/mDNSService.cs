@@ -16,10 +16,10 @@ namespace Core
         public event RecordDiscoveredDelegate RecordDiscovered;
 
         private bool _isThreadRunning = true;
-        private Thread _thread;
+        private Thread? _thread = null;
 
-        private List<string> _questionsAsked = new List<string>();
-        private Dictionary<string, int> _advertisingNames = new Dictionary<string, int>();
+        private List<string> _questionsAsked = new();
+        private Dictionary<string, ServiceDetails> _services = new();
 
         public async Task Perform(Discovery discovery)
         {
@@ -39,10 +39,9 @@ namespace Core
             _thread.Join();
         }
 
-        public async Task Perform(Advertising discovery)
+        public async Task Perform(Advertising advert)
         {
-            _advertisingNames.Clear();
-            _advertisingNames.Add(discovery.Name, discovery.Port);
+            _services = advert.Services.ToDictionary(s => s.Service, s => s);
 
             var threadStart = new ThreadStart(Start);
             _thread = new Thread(Start);
@@ -115,7 +114,7 @@ namespace Core
                         continue; // IPv4 is not configured on this adapter
                     }
 
-                    if (adapter.Description == "Hyper-V Virtual Ethernet Adapter #2")
+                    if (adapter.Description == "Hyper-V Virtual Ethernet Adapter #3")
                     {
                         selectedInterface = p;
                         selectedNic = adapter;
@@ -179,7 +178,7 @@ namespace Core
 
                     foreach (var q in _questionsAsked)
                     {
-                        initialQuery.AddQuery(q, RecordType.PTR, RecordClass.Internet);
+                        initialQuery.Queries.AddPointer(q);
                     }
 
                     var outputBuffer = initialQuery.GetBytes();
@@ -224,35 +223,48 @@ namespace Core
 
                             if (request.Queries.Any(q => q.Name == "_services._dns-sd._udp.local"))
                             {
-                                response.AddPointerAnswer("_services._dns-sd._udp.local", "_matter._tcp.local");
-                                response.AddTextAnswer("_services._dns-sd._udp.local", values);
+                                foreach (var service in _services)
+                                {
+                                    response.Answers.AddPointer("_services._dns-sd._udp.local", service.Key);
+
+                                    var serviceName = $"{service.Value.Name}.{service.Value.Service}";
+                                    var hostName = $"{service.Value.Name}.local";
+
+                                    response.AdditionalInformation.AddPointer("_matter._tcp.local", serviceName);
+
+                                    response.AdditionalInformation.AddService(serviceName, 0, 0, service.Value.Port, hostName);
+
+                                    values = new Dictionary<string, string>();
+                                    values.Add("CM", "1");
+                                    values.Add("D", "3840");
+                                    values.Add("DN", "C# mDNS Test");
+
+                                    response.AdditionalInformation.AddText(serviceName, values);
+
+                                    foreach (var record_address in service.Value.Addresses)
+                                    {
+                                        response.AdditionalInformation.AddARecord(hostName, record_address);
+                                    }
+
+                                }
                             }
 
-                            // Add the header to the output buffer.
+                            // Only reply if we have something to say.
                             //
-                            //if (request.Queries.Any(q => _advertisingNames.ContainsKey(q.Name)))
-                            if (request.Queries.Any(q => q.Name == "_matter._tcp.local"))
+                            if (response.QueryCount > 0 || response.AnswerCount > 0)
                             {
-                                response.AddPointerAnswer("_matter._tcp.local", "TOMAS._matter._tcp.local");
+                                Console.WriteLine("─────────────────── BEGIN RESPONSE ────────────────────");
+                                Console.WriteLine(response);
+                                Console.WriteLine("──────────────────── END RESPONSE ────────────────────");
 
-                                response.AddServiceAnswer($"TOMAS._matter._tcp.local", 0, 0, 51826, hostname);
+                                var outputBuffer = response.GetBytes();
 
-                                values = new Dictionary<string, string>();
-                                values.Add("CM", "1");
-                                values.Add("D", "3840");
-                                values.Add("DN", "C# mDNS Test");
+                                ByteArrayToStringDump(outputBuffer);
 
-                                response.AddTextAnswer($"TOMAS._matter._tcp.local", values);
-                                response.AddARecordAnswer($"TOMAS.local", ipAddress);
+                                var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, senderRemote);
+
+                                Console.WriteLine($"Send {bytesSent} to {senderRemote}");
                             }
-
-                            var outputBuffer = response.GetBytes();
-
-                            ByteArrayToStringDump(outputBuffer);
-
-                            var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, senderRemote);
-
-                            Console.WriteLine($"Send {bytesSent} to {senderRemote}");
                         }
                         else
                         {
@@ -286,172 +298,6 @@ namespace Core
                 }
             }
         }
-
-        //private byte[] AddARecord(byte[] outputBuffer, string hostName, string ipAddress)
-        //{
-        //    var nodeName = EncodeName(hostName);
-
-        //    outputBuffer = outputBuffer.Concat(nodeName).ToArray();
-
-        //    var typeBytes = BitConverter.GetBytes((short)1).Reverse().ToArray(); // A
-
-        //    outputBuffer = outputBuffer.Concat(typeBytes).ToArray();
-
-        //    var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
-        //    @class[0] = @class[0].SetBit(7); // set flush to true
-
-        //    outputBuffer = outputBuffer.Concat(@class).ToArray();
-
-        //    var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(ttl).ToArray();
-
-        //    var address = ConvertIPv4Address(ipAddress);
-
-        //    // For IP4, this will be an int32
-        //    //
-        //    var dataLength = BitConverter.GetBytes((short)address.Length).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(dataLength).ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(address).ToArray();
-
-        //    return outputBuffer;
-        //}
-
-        private byte[] ConvertIPv4Address(string ipAddress)
-        {
-            return ConvertIPAddress(ipAddress, '.');
-        }
-
-        private byte[] ConvertIPAddress(string ipAddress, char separator)
-        {
-            var parts = ipAddress.Split(separator);
-
-            byte[] result = new byte[4];
-
-            int index = 0;
-
-            foreach (var part in parts)
-            {
-                if (string.IsNullOrEmpty(part))
-                {
-                    result[index++] = 0x00;
-                }
-                else
-                {
-                    result[index++] = byte.Parse(part);
-                }
-            }
-
-            return result;
-        }
-
-
-        //private byte[] AddSrv(byte[] outputBuffer, string host, short priority, short weight, int port, string hostname)
-        //{
-        //    var nodeName = Utilities.EncodeName(host);
-
-        //    outputBuffer = outputBuffer.Concat(nodeName).ToArray();
-
-        //    var type = BitConverter.GetBytes((short)33).Reverse().ToArray(); // SRV
-
-        //    outputBuffer = outputBuffer.Concat(type).ToArray();
-
-        //    var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
-        //    @class[0] = @class[0].SetBit(7); // set flush to true
-
-        //    outputBuffer = outputBuffer.Concat(@class).ToArray();
-
-        //    var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(ttl).ToArray();
-
-        //    var svrName =   EncodeName(hostname);
-
-        //    int totalLength = svrName.Length + 2 + 2 + 2; // name + priority + weight + port
-
-        //    var dataLength = BitConverter.GetBytes((short)totalLength).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(dataLength).ToArray();
-
-        //    var priorityBytes = BitConverter.GetBytes(priority).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(priorityBytes).ToArray();
-
-        //    var weightBytes = BitConverter.GetBytes(weight).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(weightBytes).ToArray();
-
-        //    var portBytes = BitConverter.GetBytes((short)port).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(portBytes).ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(svrName).ToArray();
-
-        //    return outputBuffer;
-        //}
-
-        //private byte[] AddTxt(byte[] outputBuffer, string v, Dictionary<string, string> values)
-        //{
-        //    var nodeName = Utilities.EncodeName(v);
-
-        //    outputBuffer = outputBuffer.Concat(nodeName).ToArray();
-
-        //    var type = BitConverter.GetBytes((short)16).Reverse().ToArray(); // TXT
-
-        //    outputBuffer = outputBuffer.Concat(type).ToArray();
-
-        //    var @class = BitConverter.GetBytes((short)1).Reverse().ToArray(); // Internet
-        //    @class[0] = @class[0].SetBit(7); // set flush to true
-
-        //    outputBuffer = outputBuffer.Concat(@class).ToArray();
-
-        //    var ttl = BitConverter.GetBytes(120).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(ttl).ToArray();
-
-        //    var txtRecord = GetTxtRecord(values);
-
-        //    var recordLength = BitConverter.GetBytes((short)txtRecord.Length).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(recordLength).ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(txtRecord).ToArray();
-
-        //    return outputBuffer;
-        //}
-
-        //private byte[] AddPtr(byte[] outputBuffer, string v1, string v2)
-        //{
-        //    var ptrNodeName = Utilities.EncodeName(v1);
-
-        //    outputBuffer = outputBuffer.Concat(ptrNodeName).ToArray();
-
-        //    var type = BitConverter.GetBytes((ushort)12).Reverse().ToArray(); // PTR
-
-        //    outputBuffer = outputBuffer.Concat(type).ToArray();
-
-        //    var @class = BitConverter.GetBytes((ushort)1).Reverse().ToArray(); // Internet
-
-        //    outputBuffer = outputBuffer.Concat(@class).ToArray();
-
-        //    var ttl = BitConverter.GetBytes((uint)120).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(ttl).ToArray();
-
-        //    var ptrServiceName = Utilities.EncodeName(v2);
-
-        //    var recordLength = BitConverter.GetBytes((ushort)ptrServiceName.Length).Reverse().ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(recordLength).ToArray();
-
-        //    outputBuffer = outputBuffer.Concat(ptrServiceName).ToArray();
-
-        //    return outputBuffer;
-        //}
-
-
 
         public static void ByteArrayToStringDump(byte[] ba)
         {
