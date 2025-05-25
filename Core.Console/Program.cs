@@ -1,20 +1,20 @@
-﻿using Core;
+﻿using mDNS.Core;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
 mDNSService service = new mDNSService();
 
-//service.RecordDiscovered += (object sender, Record[] records) =>
-//{
-//    foreach (Record record in records)
-//    {
-//        Console.WriteLine("Found {0}", record.Name);
-//    }
-//};
+service.RecordDiscovered += (object sender, Record[] records) =>
+{
+    foreach (Record record in records)
+    {
+        Console.WriteLine("Found {0}", record.Name);
+    }
+};
 
-//await service.Perform(new Discovery("D5096097147FB61E-ABABABAB00010001._matter._tcp.local"));
-//await service.Perform(new Discovery("_http._tcp.local"));
+await service.Perform(new Discovery("D5096097147FB61E-ABABABAB00010001._matter._tcp.local"));
 
+/*
 var addresses = new List<string>();
 
 foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
@@ -36,6 +36,5 @@ foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
     }
 }
 
-//UdpClient receivingUdpClient = new UdpClient(11000);
-
 await service.Perform(new Advertising(new ServiceDetails("_matter._tcp.local", "TOMAS", 11000, addresses.ToArray())));
+*/

@@ -8,7 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Core
+namespace mDNS.Core
 {
     public class mDNSService
     {
@@ -277,7 +277,7 @@ namespace Core
                                 if (request.Answers.Any(q => q.Name == firstQuestion))
                                 {
                                     Console.WriteLine($"Response to query {firstQuestion} was received");
-                                    RecordDiscovered?.Invoke(this, request.Answers.ToArray());
+                                    RecordDiscovered?.Invoke(this, request.AdditionalInformation.ToArray());
                                 }
                             }
                         }

@@ -1,4 +1,4 @@
-﻿namespace Core
+﻿namespace mDNS.Core
 {
     public enum RequestType
     {
