@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -20,6 +21,13 @@ namespace mDNS.Core
 
         private List<string> _questionsAsked = new();
         private Dictionary<string, ServiceDetails> _services = new();
+
+        private readonly ILogger<mDNSService> _logger;
+
+        public mDNSService(ILogger<mDNSService> logger)
+        {
+            _logger = logger;
+        }
 
         public async Task Perform(Discovery discovery)
         {
@@ -71,14 +79,13 @@ namespace mDNS.Core
                 foreach (NetworkInterface adapter in nics)
                 {
                     IPInterfaceProperties properties = adapter.GetIPProperties();
-                    Console.WriteLine(adapter.Description);
-                    Console.WriteLine(String.Empty.PadLeft(adapter.Description.Length, '='));
-                    Console.WriteLine("  Interface type .......................... : {0}", adapter.NetworkInterfaceType);
-                    Console.WriteLine("  Physical Address ........................ : {0}", adapter.GetPhysicalAddress().ToString());
-                    Console.WriteLine("  Minimum Speed............................ : {0}", adapter.Speed);
-                    Console.WriteLine("  Is receive only.......................... : {0}", adapter.IsReceiveOnly);
-                    Console.WriteLine("  Multicast................................ : {0}", adapter.SupportsMulticast);
-                    Console.WriteLine();
+                    _logger.LogInformation(adapter.Description);
+                    _logger.LogInformation(String.Empty.PadLeft(adapter.Description.Length, '='));
+                    _logger.LogInformation("  Interface type .......................... : {0}", adapter.NetworkInterfaceType);
+                    _logger.LogInformation("  Physical Address ........................ : {0}", adapter.GetPhysicalAddress().ToString());
+                    _logger.LogInformation("  Minimum Speed............................ : {0}", adapter.Speed);
+                    _logger.LogInformation("  Is receive only.......................... : {0}", adapter.IsReceiveOnly);
+                    _logger.LogInformation("  Multicast................................ : {0}", adapter.SupportsMulticast);
                 }
 
                 foreach (NetworkInterface adapter in nics)
@@ -128,10 +135,10 @@ namespace mDNS.Core
                 var address = BitConverter.ToString(addressBytes).Replace("-", "");
                 var hostname = Dns.GetHostName();
 
-                Console.WriteLine($"Bound to {selectedNic.Description.ToString()}");
-                Console.WriteLine($"Bound to {selectedInterface.ToString()}");
-                Console.WriteLine($"Address is {address.ToString()}");
-                Console.WriteLine($"Hostname is {hostname.ToString()}");
+                _logger.LogInformation($"Bound to {selectedNic.Description.ToString()}");
+                _logger.LogInformation($"Bound to {selectedInterface.ToString()}");
+                _logger.LogInformation($"Address is {address.ToString()}");
+                _logger.LogInformation($"Hostname is {hostname.ToString()}");
 
                 //IPAddress multicastAddress = IPAddress.Parse("FF02::FB");
                 //IPEndPoint multicastEndpoint = new IPEndPoint(multicastAddress, 5353);
@@ -170,7 +177,7 @@ namespace mDNS.Core
 
                 IPAddress ipAddress = IPAddress.Parse(((IPEndPoint)udpclient.Client.LocalEndPoint).Address.ToString());
 
-                Console.WriteLine("Bound to {0}", ipAddress);
+                _logger.LogInformation("Bound to {0}", ipAddress);
 
                 if (_questionsAsked.Any())
                 {
@@ -185,14 +192,14 @@ namespace mDNS.Core
 
                     var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, multicastEndpoint);
 
-                    Console.WriteLine($"Send Initial Query [{bytesSent}] to [{multicastEndpoint}]");
+                    _logger.LogInformation($"Send Initial Query [{bytesSent}] to [{multicastEndpoint}]");
                 }
 
                 while (_isThreadRunning)
                 {
                     try
                     {
-                        Console.WriteLine("Waiting for incoming data...");
+                        _logger.LogInformation("Waiting for incoming data...");
 
                         var buffer = new byte[2028];
                         int numberOfbytesReceived = udpclient.Client.ReceiveFrom(buffer, ref senderRemote);
@@ -209,9 +216,9 @@ namespace mDNS.Core
 
                         var request = new DNSMessage(content);
 
-                        Console.WriteLine("─────────────────── BEGIN REQUEST ────────────────────");
-                        Console.WriteLine(request);
-                        Console.WriteLine("──────────────────── END REQUEST ────────────────────");
+                        _logger.LogInformation("─────────────────── BEGIN REQUEST ────────────────────");
+                        _logger.LogInformation(request.ToString());
+                        _logger.LogInformation("──────────────────── END REQUEST ────────────────────");
 
                         if (request.IsQuery)
                         {
@@ -253,9 +260,9 @@ namespace mDNS.Core
                             //
                             if (response.QueryCount > 0 || response.AnswerCount > 0)
                             {
-                                Console.WriteLine("─────────────────── BEGIN RESPONSE ────────────────────");
-                                Console.WriteLine(response);
-                                Console.WriteLine("──────────────────── END RESPONSE ────────────────────");
+                                _logger.LogInformation("─────────────────── BEGIN RESPONSE ────────────────────");
+                                _logger.LogInformation(response.ToString());
+                                _logger.LogInformation("──────────────────── END RESPONSE ────────────────────");
 
                                 var outputBuffer = response.GetBytes();
 
@@ -263,7 +270,7 @@ namespace mDNS.Core
 
                                 var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, senderRemote);
 
-                                Console.WriteLine($"Send {bytesSent} to {senderRemote}");
+                                _logger.LogInformation($"Send {bytesSent} to {senderRemote}");
                             }
                         }
                         else
@@ -276,7 +283,7 @@ namespace mDNS.Core
                             {
                                 if (request.Answers.Any(q => q.Name == firstQuestion))
                                 {
-                                    Console.WriteLine($"Response to query {firstQuestion} was received");
+                                    _logger.LogInformation($"Response to query {firstQuestion} was received");
                                     RecordDiscovered?.Invoke(this, request.AdditionalInformation.ToArray());
                                 }
                             }
@@ -284,17 +291,17 @@ namespace mDNS.Core
                     }
                     catch (Exception exp)
                     {
-                        Console.WriteLine(exp.Message);
+                        _logger.LogInformation(exp.Message);
                     }
                 }
             }
             catch (Exception exp)
             {
-                Console.WriteLine(exp.Message);
+                _logger.LogInformation(exp.Message);
 
                 if (exp.InnerException != null)
                 {
-                    Console.WriteLine(exp.InnerException.Message);
+                    _logger.LogInformation(exp.InnerException.Message);
                 }
             }
         }
