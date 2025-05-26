@@ -2,9 +2,8 @@
 {
     public class ServiceDetails
     {
-        public ServiceDetails(string service, string name, ushort port, string[] addresses)
+        public ServiceDetails(string name, string service, ushort port, string[] addresses)
         {
-
             Service = service;
             Name = name;
             Port = port;

@@ -13,32 +13,32 @@ namespace mDNS.Core
 {
     public class mDNSService
     {
-        public delegate void RecordDiscoveredDelegate(object sender, Record[] record);
-        public event RecordDiscoveredDelegate RecordDiscovered;
+        public delegate void ServiceDiscoveredDelegate(object sender, ServiceDetails service);
+        public event ServiceDiscoveredDelegate ServiceDiscovered;
 
         private bool _isThreadRunning = true;
         private Thread? _thread = null;
 
-        private List<string> _questionsAsked = new();
         private Dictionary<string, ServiceDetails> _services = new();
 
         private readonly ILogger<mDNSService> _logger;
+        private bool _isPerformingServiceDiscovery;
 
         public mDNSService(ILogger<mDNSService> logger)
         {
             _logger = logger;
         }
 
-        public async Task Perform(Discovery discovery)
+        public async Task Perform(ServiceDiscovery discovery)
         {
-            _questionsAsked.Clear();
-            _questionsAsked.Add(discovery.Name);
+            _isPerformingServiceDiscovery = true;
 
             var threadStart = new ThreadStart(Start);
             _thread = new Thread(Start);
             _thread.Start();
 
-            // Give it time to finish. TODO Pass this in as an argument.
+            // Give it time to finish.
+            // TODO For service discovery, we might leave this running for ever??
             //
             await Task.Delay(30000);
 
@@ -179,20 +179,17 @@ namespace mDNS.Core
 
                 _logger.LogInformation("Bound to {0}", ipAddress);
 
-                if (_questionsAsked.Any())
+                if (_isPerformingServiceDiscovery)
                 {
-                    DNSMessage initialQuery = new DNSMessage(false);
+                    DNSMessage serviceDiscoveryQuery = new DNSMessage(false);
 
-                    foreach (var q in _questionsAsked)
-                    {
-                        initialQuery.Queries.AddPointer(q);
-                    }
+                    serviceDiscoveryQuery.Queries.AddPointer("_services._dns-sd._udp.local");
 
-                    var outputBuffer = initialQuery.GetBytes();
+                    var outputBuffer = serviceDiscoveryQuery.GetBytes();
 
                     var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, multicastEndpoint);
 
-                    _logger.LogInformation($"Send Initial Query [{bytesSent}] to [{multicastEndpoint}]");
+                    _logger.LogInformation($"Sent Service Discovery Query [{bytesSent}] to [{multicastEndpoint}]");
                 }
 
                 while (_isThreadRunning)
@@ -275,16 +272,57 @@ namespace mDNS.Core
                         }
                         else
                         {
-                            // Response received. Look through the answers to see if they match the query we sent.
+                            // Response received. 
                             // 
-                            var firstQuestion = _questionsAsked.FirstOrDefault();
+                            // Is this a service?
+                            //
+                            var responseContainsServices = request.Answers.Any(q => q.Name == "_services._dns-sd._udp.local");
 
-                            if (firstQuestion != null)
+                            if (responseContainsServices)
                             {
-                                if (request.Answers.Any(q => q.Name == firstQuestion))
+                                var answerRecords = request.Answers.Where(q => q.Name == "_services._dns-sd._udp.local");
+
+                                foreach (var answerRecord in answerRecords)
                                 {
-                                    _logger.LogInformation($"Response to query {firstQuestion} was received");
-                                    RecordDiscovered?.Invoke(this, request.AdditionalInformation.ToArray());
+                                    var pointer = answerRecord as PointerRecord;
+
+                                    var matchingRecord = request.GetRecord(pointer!.Value);
+
+                                    var matchingRecordPointer = matchingRecord as PointerRecord;
+
+                                    var serviceType = pointer.Value;
+                                    var serviceName = matchingRecordPointer!.Value;
+
+                                    var serviceRecords = request.GetRecords(matchingRecordPointer!.Value);
+
+                                    ushort servicePort = 1000;
+                                    string? serviceHostname = null;
+                                    List<string> addresses = [];
+
+                                    foreach (var serviceRecord in serviceRecords)
+                                    {
+                                        if (serviceRecord.Type == RecordType.SRV)
+                                        {
+                                            var r = serviceRecord as ServiceRecord;
+                                            servicePort = r.Port;
+                                            serviceHostname = r.Hostname;
+                                        }
+                                    }
+
+                                    var hostnameRecords = request.GetRecords(serviceHostname);
+
+                                    foreach (var addressRecord in hostnameRecords)
+                                    {
+                                        if (addressRecord.Type == RecordType.A)
+                                        {
+                                            //var r = addressRecord as ARecord;
+                                            //addresses.Add(r.IPAddress);
+                                        }
+                                    }
+
+                                    var serviceDetails = new ServiceDetails(serviceName, serviceType, servicePort, addresses.ToArray());
+
+                                    ServiceDiscovered?.Invoke(this, serviceDetails);
                                 }
                             }
                         }

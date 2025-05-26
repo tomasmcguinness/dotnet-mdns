@@ -1,12 +1,10 @@
 ﻿namespace mDNS.Core
 {
-    public class Discovery
+    public class ServiceDiscovery
     {
-        public Discovery(string name)
+        public ServiceDiscovery()
         {
-            Name = name;
-        }
 
-        public string Name { get; }
+        }
     }
 }

@@ -1,3 +1,5 @@
+using mDNS.Core;
+
 namespace Core.Tests
 {
     public class Tests

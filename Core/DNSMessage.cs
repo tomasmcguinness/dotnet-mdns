@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -10,6 +11,9 @@ namespace mDNS.Core
     {
         public DNSMessage(byte[] bytes)
         {
+            // DNS Uses Network Byte Order (Big Endian). C# is Little Endian.
+            // Reverse all bytes before turning into numbers. TODO Put this in a utility class.
+            //
             ReadOnlySpan<byte> messageSpan = bytes.AsSpan();
 
             // Start reading the header.
@@ -20,8 +24,6 @@ namespace mDNS.Core
 
             IsQuery = flags[0] == 0x00;
 
-            // DNS Uses Network Byte Order (Big Endian). C# is Little Endian.
-            //
             var questionCountBytes = messageSpan.Slice(4, 2).ToArray();
             var reversedQuestionCountBytes = questionCountBytes.Reverse();
             var queryCount = BitConverter.ToUInt16(reversedQuestionCountBytes.ToArray());
@@ -30,8 +32,12 @@ namespace mDNS.Core
             var reversedAnswerCountBytes = answerCountBytes.Reverse();
             var answerCount = BitConverter.ToUInt16(reversedAnswerCountBytes.ToArray());
 
-            // Ignore Authority Records (NSCOUNT) and Additional Records (ARCOUNT) for now.
+            // Ignore Authority Records (NSCOUNT)
             //
+
+            var additionalInformationCountBytes = messageSpan.Slice(10, 2).ToArray();
+            var reversedAdditionalInformationCount = additionalInformationCountBytes.Reverse();
+            var additionalInformationCount = BitConverter.ToUInt16(reversedAdditionalInformationCount.ToArray());
 
             // DNS Header is 12 bytes long.
             //
@@ -39,94 +45,62 @@ namespace mDNS.Core
 
             for (int i = 0; i < queryCount; i++)
             {
-                var nameBuffer = new byte[0];
-
-                // Work through the first few bytes. These represent the name. 
-                // There is a null terminator.
-                //
-                var questionSpan = messageSpan.Slice(contentIndex);
-
-                int nameLength = 0;
-
-                for (int x = 0; x < 255; x++)
-                {
-                    if (questionSpan[x] == 0x00)
-                    {
-                        nameLength = x + 1; // Add one to account for the loop starting at 0.
-                        break;
-                    }
-                    // If this starts with a 11, it means it's a pointer.
-                    //
-                    else if ((0x3F & questionSpan[x]) == 0)
-                    {
-                        nameLength = x + 2; // Include the offset byte.
-                        break;
-                    }
-                }
-
-                var nameSpan = questionSpan.Slice(0, nameLength);
-
-                var name = DecodeName(nameSpan, messageSpan);
-                contentIndex += nameLength;
-
-                var typeBytes = messageSpan.Slice(contentIndex, 2).ToArray();
-                var reversedTypeBytes = typeBytes.Reverse();
-                var type = (RecordType)BitConverter.ToUInt16(reversedTypeBytes.ToArray());
-                contentIndex += 2;
-
-                var classBytes = messageSpan.Slice(contentIndex, 2).ToArray();
-                var classBytesReversed = classBytes.Reverse();
-                var @class = (RecordClass)BitConverter.ToUInt16(classBytesReversed.ToArray());
-                contentIndex += 2;
-
-                // Query records don't have TTL & RData.
-                //
-
-                // Add this record to the list of questions being asked.
-                //
-                Queries.Add(new Record(name, type, @class));
+                Queries.Add(ParseRecord(messageSpan, true, ref contentIndex));
             }
 
             for (int i = 0; i < answerCount; i++)
             {
-                var nameBuffer = new byte[0];
+                Answers.Add(ParseRecord(messageSpan, false, ref contentIndex));
+            }
 
-                // Work through the first few bytes. These represent the name. 
-                // There is a null terminator.
-                //
-                var questionSpan = messageSpan.Slice(contentIndex);
+            for (int i = 0; i < additionalInformationCount; i++)
+            {
+                AdditionalInformation.Add(ParseRecord(messageSpan, false, ref contentIndex));
+            }
+        }
 
-                int nameLength = 0;
+        private Record ParseRecord(ReadOnlySpan<byte> messageSpan, bool isQuery, ref int contentIndex)
+        {
+            var nameBuffer = new byte[0];
 
-                for (int x = 0; x < 255; x++)
+            // Work through the first few bytes. These represent the name. 
+            // There is a null terminator.
+            //
+            var questionSpan = messageSpan.Slice(contentIndex);
+
+            int nameLength = 0;
+
+            for (int x = 0; x < 255; x++)
+            {
+                if (questionSpan[x] == 0x00)
                 {
-                    if (questionSpan[x] == 0x00)
-                    {
-                        nameLength = x + 1;
-                        break;
-                    }
-                    else if (questionSpan[x] == 0xC0 || questionSpan[x] == 0xC1)
-                    {
-                        nameLength = x + 2; // Include the offset byte.
-                        break;
-                    }
+                    nameLength = x + 1;
+                    break;
                 }
+                else if (questionSpan[x] == 0xC0 || questionSpan[x] == 0xC1)
+                {
+                    nameLength = x + 2; // Include the offset byte.
+                    break;
+                }
+            }
 
-                var nameSpan = questionSpan.Slice(0, nameLength);
+            var nameSpan = questionSpan.Slice(0, nameLength);
 
-                var name = DecodeName(nameSpan, messageSpan);
-                contentIndex += nameLength;
+            var name = Serialization.DecodeName(nameSpan, messageSpan);
+            contentIndex += nameLength;
 
-                var typeBytes = messageSpan.Slice(contentIndex, 2).ToArray();
-                var reversedTypeBytes = typeBytes.Reverse();
-                var type = (RecordType)BitConverter.ToUInt16(reversedTypeBytes.ToArray());
-                contentIndex += 2;
+            var typeBytes = messageSpan.Slice(contentIndex, 2).ToArray();
+            var reversedTypeBytes = typeBytes.Reverse();
+            var type = (RecordType)BitConverter.ToUInt16(reversedTypeBytes.ToArray());
+            contentIndex += 2;
 
-                var classBytes = messageSpan.Slice(contentIndex, 2).ToArray();
-                var classBytesReversed = classBytes.Reverse();
-                var @class = (RecordClass)BitConverter.ToUInt16(classBytesReversed.ToArray());
-                contentIndex += 2;
+            var classBytes = messageSpan.Slice(contentIndex, 2).ToArray();
+            var classBytesReversed = classBytes.Reverse();
+            var @class = (RecordClass)BitConverter.ToUInt16(classBytesReversed.ToArray());
+            contentIndex += 2;
 
+            if (!isQuery)
+            {
                 var ttlBytes = messageSpan.Slice(contentIndex, 4).ToArray();
                 var ttlBytesReversed = ttlBytes.Reverse();
                 var ttl = BitConverter.ToUInt32(ttlBytesReversed.ToArray());
@@ -137,12 +111,27 @@ namespace mDNS.Core
                 var rdDataLength = BitConverter.ToUInt16(rdDataLengthBytesReversed.ToArray());
                 contentIndex += 2;
 
-                var rdDataBytes = messageSpan.Slice(contentIndex, rdDataLength).ToArray();
+                var recordData = messageSpan.Slice(contentIndex, rdDataLength).ToArray();
                 contentIndex += rdDataLength;
 
-                // Add this record to the list of answers.
-                //
-                Answers.Add(new Record(name, type, @class, ttl, rdDataBytes));
+                if (type == RecordType.PTR)
+                {
+                    var decodedName = Serialization.DecodeName(recordData, messageSpan);
+                    return new PointerRecord(name, type, @class, ttl, decodedName);
+                }
+                else if (type == RecordType.SRV)
+                {
+                    (ushort port, string hostname) = Serialization.DecodeServiceData(recordData, messageSpan);
+                    return new ServiceRecord(name, type, @class, ttl, port, hostname);
+                }
+                else
+                {
+                    return new Record(name, type, @class, ttl);
+                }
+            }
+            else
+            {
+                return new Record(name, type, @class);
             }
         }
 
@@ -166,6 +155,8 @@ namespace mDNS.Core
         public List<Record> Answers { get; } = [];
 
         public List<Record> AdditionalInformation { get; } = [];
+
+        public List<Record> AllRecords => Queries.Concat(Answers).Concat(AdditionalInformation).ToList();
 
         public byte[] GetBytes()
         {
@@ -239,6 +230,16 @@ namespace mDNS.Core
             return sb.ToString();
         }
 
+        internal Record? GetRecord(string value)
+        {
+            return AllRecords.SingleOrDefault(r => r.Name == value);
+        }
+
+        internal Record[] GetRecords(string value)
+        {
+            return AllRecords.Where(r => r.Name == value).ToArray();
+        }
+
         private void SerializeRecord(BinaryWriter writer, Record record)
         {
             var ptrNodeName = Serialization.EncodeName(record.Name);
@@ -250,8 +251,11 @@ namespace mDNS.Core
             var @class = BitConverter.GetBytes((ushort)record.Class).Reverse().ToArray(); // Internet
             writer.Write(@class);
 
-            var ttl = BitConverter.GetBytes((uint)120).Reverse().ToArray();
-            writer.Write(ttl);
+            if (record.TTL is not null)
+            {
+                var ttl = BitConverter.GetBytes((uint)120).Reverse().ToArray();
+                writer.Write(ttl);
+            }
 
             // Set the RDData
             //
@@ -269,72 +273,38 @@ namespace mDNS.Core
                 }
             }
         }
-
-        private string DecodeName(ReadOnlySpan<byte> nameSpan, ReadOnlySpan<byte> messageSpan)
-        {
-            StringBuilder sb = new StringBuilder();
-
-            for (int i = 0; i < nameSpan.Length; i += 0)
-            {
-                var length = nameSpan[i];
-
-                if (length == 0x00)
-                {
-                    break;
-                }
-                // If this starts with a 11, it means it's a pointer.
-                //
-                else if ((0x3F & length) == 0)
-                {
-                    var offset = nameSpan[i + 1];
-
-                    var nameSpanAtOffset = messageSpan.Slice(offset);
-
-                    sb.Append(DecodeName(nameSpanAtOffset, messageSpan));
-
-                    break;
-                }
-
-                var bytes = nameSpan.Slice(i + 1, length).ToArray();
-                sb.Append(Encoding.UTF8.GetString(bytes));
-                sb.Append(".");
-                i += (length + 1);
-            }
-
-            return sb.ToString().TrimEnd('.');
-        }
     }
 
     public static class DNSMessageExtensions
     {
-        private static void AddRecord(List<Record> records, string name, RecordType type, RecordClass @class, byte[]? data)
+        private static void AddRecord(List<Record> records, string name, RecordType type, RecordClass @class, uint ttl, byte[] data)
         {
-            records.Add(new Record(name, type, @class, 120, data!));
+            records.Add(new Record(name, type, @class, ttl!, data!));
         }
 
         public static void AddPointer(this List<Record> records, string name)
         {
-            AddRecord(records, name, RecordType.PTR, RecordClass.Internet, null);
+            records.Add(new Record(name, RecordType.PTR, RecordClass.Internet));
         }
 
         public static void AddPointer(this List<Record> records, string name, string value)
         {
-            AddRecord(records, name, RecordType.PTR, RecordClass.Internet, Serialization.EncodeName(value));
+            AddRecord(records, name, RecordType.PTR, RecordClass.Internet, 120, Serialization.EncodeName(value));
         }
 
         public static void AddText(this List<Record> records, string name, Dictionary<string, string> values)
         {
-            AddRecord(records, name, RecordType.TXT, RecordClass.Internet, Serialization.EncodeTextValues(values));
+            AddRecord(records, name, RecordType.TXT, RecordClass.Internet, 120, Serialization.EncodeTextValues(values));
         }
 
         public static void AddService(this List<Record> records, string name, ushort priority, ushort weight, ushort port, string hostname)
         {
-            AddRecord(records, name, RecordType.SRV, RecordClass.Internet, Serialization.EncodeService(priority, weight, port, hostname));
+            AddRecord(records, name, RecordType.SRV, RecordClass.Internet, 120, Serialization.EncodeService(priority, weight, port, hostname));
         }
 
         public static void AddARecord(this List<Record> records, string name, string ipAddress)
         {
-            AddRecord(records, name, RecordType.A, RecordClass.Internet, Serialization.EncodeIPv4Address(ipAddress));
+            AddRecord(records, name, RecordType.A, RecordClass.Internet, 120, Serialization.EncodeIPv4Address(ipAddress));
         }
     }
 }

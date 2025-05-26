@@ -26,6 +26,40 @@ namespace mDNS.Core
             return result.Concat(new byte[1] { 0x00 }).ToArray();
         }
 
+        public static string DecodeName(ReadOnlySpan<byte> nameSpan, ReadOnlySpan<byte> messageSpan)
+        {
+            StringBuilder sb = new StringBuilder();
+
+            for (int i = 0; i < nameSpan.Length; i += 0)
+            {
+                var length = nameSpan[i];
+
+                if (length == 0x00)
+                {
+                    break;
+                }
+                // If this starts with a 11, it means it's a pointer.
+                //
+                else if ((0x3F & length) == 0)
+                {
+                    var offset = nameSpan[i + 1];
+
+                    var nameSpanAtOffset = messageSpan.Slice(offset);
+
+                    sb.Append(DecodeName(nameSpanAtOffset, messageSpan));
+
+                    break;
+                }
+
+                var bytes = nameSpan.Slice(i + 1, length).ToArray();
+                sb.Append(Encoding.UTF8.GetString(bytes));
+                sb.Append(".");
+                i += (length + 1);
+            }
+
+            return sb.ToString().TrimEnd('.');
+        }
+
         public static byte[] EncodeTextValues(Dictionary<string, string> values)
         {
             var result = new byte[0];
@@ -86,6 +120,11 @@ namespace mDNS.Core
             writer.Write(encodedHostname.ToArray());
 
             return ms.ToArray();
+        }
+
+        internal static (ushort port, string hostname) DecodeServiceData(byte[] rdDataBytes, ReadOnlySpan<byte> messageSpan)
+        {
+            return (10, "tom");
         }
     }
 }

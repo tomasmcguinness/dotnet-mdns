@@ -1,18 +1,19 @@
 ﻿using mDNS.Core;
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
-mDNSService service = new mDNSService();
+//using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
+//ILogger<mDNSService> logger = factory.CreateLogger<mDNSService>();
+ILogger<mDNSService> logger = new NullLogger<mDNSService>();
 
-service.RecordDiscovered += (object sender, Record[] records) =>
+mDNSService service = new mDNSService(logger);
+
+service.ServiceDiscovered += (object sender, ServiceDetails service) =>
 {
-    foreach (Record record in records)
-    {
-        Console.WriteLine("Found {0}", record.Name);
-    }
+    Console.WriteLine("Found {0}", service.Name);
 };
 
-await service.Perform(new Discovery("D5096097147FB61E-ABABABAB00010001._matter._tcp.local"));
+await service.Perform(new ServiceDiscovery());
 
 /*
 var addresses = new List<string>();
