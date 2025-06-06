@@ -2,7 +2,7 @@
 {
     public class ServiceDiscovery
     {
-        public ServiceDiscovery()
+        public ServiceDiscovery(params string[] serviceNames)
         {
 
         }

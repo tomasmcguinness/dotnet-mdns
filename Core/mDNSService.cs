@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -29,22 +30,13 @@ namespace mDNS.Core
             _logger = logger;
         }
 
-        public async Task Perform(ServiceDiscovery discovery)
+        public void Perform(ServiceDiscovery discovery)
         {
             _isPerformingServiceDiscovery = true;
 
             var threadStart = new ThreadStart(Start);
             _thread = new Thread(Start);
             _thread.Start();
-
-            // Give it time to finish.
-            // TODO For service discovery, we might leave this running for ever??
-            //
-            await Task.Delay(30000);
-
-            _isThreadRunning = false;
-
-            _thread.Join();
         }
 
         public async Task Perform(Advertising advert)
@@ -54,14 +46,17 @@ namespace mDNS.Core
             var threadStart = new ThreadStart(Start);
             _thread = new Thread(Start);
             _thread.Start();
+        }
 
-            // Give it time to finish. TODO Pass this in as an argument.
-            //
-            await Task.Delay(30000);
-
+        public void Stop()
+        {
             _isThreadRunning = false;
 
-            _thread.Join();
+            if (_thread != null)
+            {
+                _thread.Join();
+                _thread = null;
+            }
         }
 
         private void Start()
@@ -179,23 +174,33 @@ namespace mDNS.Core
 
                 _logger.LogInformation("Bound to {0}", ipAddress);
 
-                if (_isPerformingServiceDiscovery)
-                {
-                    DNSMessage serviceDiscoveryQuery = new DNSMessage(false);
-
-                    serviceDiscoveryQuery.Queries.AddPointer("_services._dns-sd._udp.local");
-
-                    var outputBuffer = serviceDiscoveryQuery.GetBytes();
-
-                    var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, multicastEndpoint);
-
-                    _logger.LogInformation($"Sent Service Discovery Query [{bytesSent}] to [{multicastEndpoint}]");
-                }
+                Stopwatch stopwatch = new Stopwatch();
+                stopwatch.Start();
 
                 while (_isThreadRunning)
                 {
                     try
                     {
+                        if (_isPerformingServiceDiscovery)
+                        {
+                            // Send a service discovery query every 2 seconds.
+                            //
+                            if (stopwatch.Elapsed.Seconds > 2)
+                            {
+                                DNSMessage serviceDiscoveryQuery = new DNSMessage(false);
+
+                                serviceDiscoveryQuery.Queries.AddPointer("_services._dns-sd._udp.local");
+
+                                var outputBuffer = serviceDiscoveryQuery.GetBytes();
+
+                                var bytesSent = udpclient.Client.SendTo(outputBuffer, 0, outputBuffer.Length, SocketFlags.None, multicastEndpoint);
+
+                                _logger.LogInformation($"Sent Service Discovery Query [{bytesSent}] to [{multicastEndpoint}]");
+
+                                stopwatch.Restart();
+                            }
+                        }
+
                         _logger.LogInformation("Waiting for incoming data...");
 
                         var buffer = new byte[2028];
@@ -249,7 +254,6 @@ namespace mDNS.Core
                                     {
                                         response.AdditionalInformation.AddARecord(hostName, record_address);
                                     }
-
                                 }
                             }
 
@@ -274,7 +278,7 @@ namespace mDNS.Core
                         {
                             // Response received. 
                             // 
-                            // Is this a service?
+                            // Does this contain a DNS-SD answer??
                             //
                             var responseContainsServices = request.Answers.Any(q => q.Name == "_services._dns-sd._udp.local");
 
@@ -288,41 +292,49 @@ namespace mDNS.Core
 
                                     var matchingRecord = request.GetRecord(pointer!.Value);
 
-                                    var matchingRecordPointer = matchingRecord as PointerRecord;
-
-                                    var serviceType = pointer.Value;
-                                    var serviceName = matchingRecordPointer!.Value;
-
-                                    var serviceRecords = request.GetRecords(matchingRecordPointer!.Value);
-
-                                    ushort servicePort = 1000;
-                                    string? serviceHostname = null;
-                                    List<string> addresses = [];
-
-                                    foreach (var serviceRecord in serviceRecords)
+                                    if (matchingRecord is not null)
                                     {
-                                        if (serviceRecord.Type == RecordType.SRV)
+                                        var matchingRecordPointer = matchingRecord as PointerRecord;
+
+                                        var serviceType = pointer.Value;
+                                        var serviceName = matchingRecordPointer!.Value;
+
+                                        var serviceRecords = request.GetRecords(matchingRecordPointer!.Value);
+
+                                        ushort servicePort = 1000;
+                                        string? serviceHostname = null;
+                                        List<string> addresses = [];
+
+                                        foreach (var serviceRecord in serviceRecords)
                                         {
-                                            var r = serviceRecord as ServiceRecord;
-                                            servicePort = r.Port;
-                                            serviceHostname = r.Hostname;
+                                            if (serviceRecord.Type == RecordType.SRV)
+                                            {
+                                                var r = serviceRecord as ServiceRecord;
+                                                servicePort = r.Port;
+                                                serviceHostname = r.Hostname;
+                                            }
                                         }
-                                    }
 
-                                    var hostnameRecords = request.GetRecords(serviceHostname);
+                                        var hostnameRecords = request.GetRecords(serviceHostname);
 
-                                    foreach (var addressRecord in hostnameRecords)
-                                    {
-                                        if (addressRecord.Type == RecordType.A)
+                                        foreach (var addressRecord in hostnameRecords)
                                         {
-                                            //var r = addressRecord as ARecord;
-                                            //addresses.Add(r.IPAddress);
+                                            if (addressRecord.Type == RecordType.A)
+                                            {
+                                                //var r = addressRecord as ARecord;
+                                                //addresses.Add(r.IPAddress);
+                                            }
+                                            else if (addressRecord.Type == RecordType.TXT)
+                                            {
+                                                //var r = addressRecord as TXTRe;
+                                                //addresses.Add(r.IPAddress.ToString());
+                                            }
                                         }
+
+                                        var serviceDetails = new ServiceDetails(serviceName, serviceType, servicePort, addresses.ToArray());
+
+                                        ServiceDiscovered?.Invoke(this, serviceDetails);
                                     }
-
-                                    var serviceDetails = new ServiceDetails(serviceName, serviceType, servicePort, addresses.ToArray());
-
-                                    ServiceDiscovered?.Invoke(this, serviceDetails);
                                 }
                             }
                         }

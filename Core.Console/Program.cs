@@ -13,7 +13,11 @@ service.ServiceDiscovered += (object sender, ServiceDetails service) =>
     Console.WriteLine("Found {0}", service.Name);
 };
 
-await service.Perform(new ServiceDiscovery());
+service.Perform(new ServiceDiscovery());
+
+await Task.Delay(60000);
+
+service.Stop();
 
 /*
 var addresses = new List<string>();
