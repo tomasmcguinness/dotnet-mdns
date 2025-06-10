@@ -304,6 +304,7 @@ namespace mDNS.Core
                                         ushort servicePort = 1000;
                                         string? serviceHostname = null;
                                         List<string> addresses = [];
+                                        Dictionary<string, string?> txtRecords = [];
 
                                         foreach (var serviceRecord in serviceRecords)
                                         {
@@ -316,7 +317,10 @@ namespace mDNS.Core
                                             else if (serviceRecord.Type == RecordType.TXT)
                                             {
                                                 var r = serviceRecord as TXTRecord;
-                                                //addresses.Add(r.IPAddress.ToString());
+                                                foreach (var item in r.Values)
+                                                {
+                                                    txtRecords.Add(item.Key, item.Value);
+                                                }
                                             }
                                         }
 
@@ -332,7 +336,7 @@ namespace mDNS.Core
                                             // else if (addressRecord.Type == RecordType.AAAA)
                                         }
 
-                                        var serviceDetails = new ServiceDetails(serviceName, serviceType, servicePort, addresses.ToArray());
+                                        var serviceDetails = new ServiceDetails(serviceName, serviceType, servicePort, txtRecords, addresses.ToArray());
 
                                         ServiceDiscovered?.Invoke(this, serviceDetails);
                                     }
