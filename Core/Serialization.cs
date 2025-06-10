@@ -134,14 +134,23 @@ namespace mDNS.Core
             var weightBytes = rdSpan.Slice(2, 2);
             var portBytes = rdSpan.Slice(4, 2);
 
-            DecodeName()
+            var nameBytes = rdSpan.Slice(6);
+            var name = DecodeName(nameBytes, messageSpan);
 
-            return (10, "tom");
+            portBytes.Reverse();
+
+            var port = BitConverter.ToUInt16(portBytes.ToArray());
+
+            return (port, name);
         }
 
-        internal static IPAddress DecodeARecord(byte[] recordData, ReadOnlySpan<byte> messageSpan)
+        internal static IPAddress DecodeARecord(byte[] rdDataBytes, ReadOnlySpan<byte> messageSpan)
         {
-            throw new NotImplementedException();
+            var rdSpan = rdDataBytes.AsSpan();
+
+            var addressBytes = rdSpan.Slice(0, 4);
+
+            return new IPAddress(addressBytes.ToArray());
         }
     }
 }

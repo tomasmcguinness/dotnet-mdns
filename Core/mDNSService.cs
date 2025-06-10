@@ -321,14 +321,14 @@ namespace mDNS.Core
                                         {
                                             if (addressRecord.Type == RecordType.A)
                                             {
-                                               var r = addressRecord as ARecord;
-                                                addresses.Add(r.IPAddress);
+                                                var r = addressRecord as ARecord;
+                                                addresses.Add(r.Address.ToString());
                                             }
-                                            else if (addressRecord.Type == RecordType.TXT)
-                                            {
-                                                var r = addressRecord as TXTRecord
-                                                addresses.Add(r.IPAddress.ToString());
-                                            }
+                                            //else if (addressRecord.Type == RecordType.TXT)
+                                            //{
+                                            //    var r = addressRecord as TXTRecord
+                                            //    addresses.Add(r.IPAddress.ToString());
+                                            //}
                                         }
 
                                         var serviceDetails = new ServiceDetails(serviceName, serviceType, servicePort, addresses.ToArray());

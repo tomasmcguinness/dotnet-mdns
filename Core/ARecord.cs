@@ -1,16 +1,15 @@
-﻿namespace mDNS.Core
+﻿using System.Net;
+
+namespace mDNS.Core
 {
     internal class ARecord : Record
     {
-        public ARecord(string name, RecordType type, RecordClass @class, uint ttl, ushort port, string hostname)
+        public ARecord(string name, RecordType type, RecordClass @class, uint ttl, IPAddress address)
             : base(name, type, @class, ttl)
         {
-            Port = port;
-            Hostname = hostname;
+            Address = address;
         }
 
-        public ushort Port { get; }
-
-        public string Hostname { get; }
+        public IPAddress Address { get; }
     }
 }
