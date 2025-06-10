@@ -163,6 +163,12 @@ namespace mDNS.Core
             {
                 var length = rdDataBytes[i];
 
+                if(length == 0x00)
+                {
+                    // This means there are no txt records.
+                    break;
+                }
+
                 var keypair = rdSpan.Slice(i + 1, length);
 
                 var parts = SplitKeyPair(keypair);
