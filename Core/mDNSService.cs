@@ -321,13 +321,13 @@ namespace mDNS.Core
                                         {
                                             if (addressRecord.Type == RecordType.A)
                                             {
-                                                //var r = addressRecord as ARecord;
-                                                //addresses.Add(r.IPAddress);
+                                               var r = addressRecord as ARecord;
+                                                addresses.Add(r.IPAddress);
                                             }
                                             else if (addressRecord.Type == RecordType.TXT)
                                             {
-                                                //var r = addressRecord as TXTRe;
-                                                //addresses.Add(r.IPAddress.ToString());
+                                                var r = addressRecord as TXTRecord
+                                                addresses.Add(r.IPAddress.ToString());
                                             }
                                         }
 

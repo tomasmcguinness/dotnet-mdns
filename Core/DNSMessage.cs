@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text;
 
 namespace mDNS.Core
@@ -34,7 +35,7 @@ namespace mDNS.Core
 
             // Ignore Authority Records (NSCOUNT)
             //
-
+            
             var additionalInformationCountBytes = messageSpan.Slice(10, 2).ToArray();
             var reversedAdditionalInformationCount = additionalInformationCountBytes.Reverse();
             var additionalInformationCount = BitConverter.ToUInt16(reversedAdditionalInformationCount.ToArray());
@@ -121,8 +122,13 @@ namespace mDNS.Core
                 }
                 else if (type == RecordType.SRV)
                 {
-                    (ushort port, string hostname) = Serialization.DecodeServiceData(recordData, messageSpan);
+                    (ushort port, string hostname) = Serialization.DecodeService(recordData, messageSpan);
                     return new ServiceRecord(name, type, @class, ttl, port, hostname);
+                }
+                else if(type == RecordType.A)
+                {
+                    IPAddress address = Serialization.DecodeARecord(recordData, messageSpan);
+                    return new ARecord(name, type, @class, ttl, address);
                 }
                 else
                 {

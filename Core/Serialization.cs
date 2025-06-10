@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text;
 
 namespace mDNS.Core
@@ -21,7 +22,7 @@ namespace mDNS.Core
                 result = result.Concat([lengthByte]).Concat(Encoding.UTF8.GetBytes(part)).ToArray();
             }
 
-            // Null terminator.
+            // Add a null terminator.
             //
             return result.Concat(new byte[1] { 0x00 }).ToArray();
         }
@@ -122,9 +123,25 @@ namespace mDNS.Core
             return ms.ToArray();
         }
 
-        internal static (ushort port, string hostname) DecodeServiceData(byte[] rdDataBytes, ReadOnlySpan<byte> messageSpan)
+        public static (ushort port, string hostname) DecodeService(byte[] rdDataBytes, ReadOnlySpan<byte> messageSpan)
         {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms);
+
+            var rdSpan = rdDataBytes.AsSpan();
+
+            var priorityBytes = rdSpan.Slice(0, 2);
+            var weightBytes = rdSpan.Slice(2, 2);
+            var portBytes = rdSpan.Slice(4, 2);
+
+            DecodeName()
+
             return (10, "tom");
+        }
+
+        internal static IPAddress DecodeARecord(byte[] recordData, ReadOnlySpan<byte> messageSpan)
+        {
+            throw new NotImplementedException();
         }
     }
 }
