@@ -1,8 +1,8 @@
 ﻿namespace mDNS.Core
 {
-    internal class ServiceRecord : Record
+    public class SVRRecord : Record
     {
-        public ServiceRecord(string name, RecordType type, RecordClass @class, uint ttl, ushort port, string hostname)
+        public SVRRecord(string name, RecordType type, RecordClass @class, uint ttl, ushort port, string hostname)
             : base(name, type, @class, ttl)
         {
             Port = port;

@@ -152,5 +152,49 @@ namespace mDNS.Core
 
             return new IPAddress(addressBytes.ToArray());
         }
+
+        internal static Dictionary<string, string> DecodeTxtRecord(byte[] rdDataBytes, ReadOnlySpan<byte> messageSpan)
+        {
+            Dictionary<string, string> values = new();
+
+            var rdSpan = rdDataBytes.AsSpan();
+
+            for (int i = 0; i < rdDataBytes.Length; i += 0)
+            {
+                var length = rdDataBytes[i];
+
+                var keypair = rdSpan.Slice(i + 1, length);
+
+                var parts = SplitKeyPair(keypair);
+
+                i += (length + 1);
+            }
+
+            return new();
+        }
+
+        private static (string key, string? value) SplitKeyPair(Span<byte> keypair)
+        {
+            int splitAt = -1;
+
+            foreach (var b in keypair)
+            {
+                if (b == 0x3D) // = character
+                {
+                    splitAt = keypair.IndexOf(b);
+                }
+            }
+
+            string key = Encoding.ASCII.GetString(keypair.Slice(0, splitAt));
+
+            string? value = null;
+
+            if(splitAt < keypair.Length)
+            {
+                value = Encoding.ASCII.GetString(keypair.Slice(splitAt + 1));
+            }
+
+            return (key, value);
+        }
     }
 }

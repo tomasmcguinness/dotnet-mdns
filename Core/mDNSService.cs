@@ -288,13 +288,13 @@ namespace mDNS.Core
 
                                 foreach (var answerRecord in answerRecords)
                                 {
-                                    var pointer = answerRecord as PointerRecord;
+                                    var pointer = answerRecord as PTRRecord;
 
                                     var matchingRecord = request.GetRecord(pointer!.Value);
 
                                     if (matchingRecord is not null)
                                     {
-                                        var matchingRecordPointer = matchingRecord as PointerRecord;
+                                        var matchingRecordPointer = matchingRecord as PTRRecord;
 
                                         var serviceType = pointer.Value;
                                         var serviceName = matchingRecordPointer!.Value;
@@ -309,9 +309,14 @@ namespace mDNS.Core
                                         {
                                             if (serviceRecord.Type == RecordType.SRV)
                                             {
-                                                var r = serviceRecord as ServiceRecord;
+                                                var r = serviceRecord as SVRRecord;
                                                 servicePort = r.Port;
                                                 serviceHostname = r.Hostname;
+                                            }
+                                            else if (serviceRecord.Type == RecordType.TXT)
+                                            {
+                                                var r = serviceRecord as TXTRecord;
+                                                //addresses.Add(r.IPAddress.ToString());
                                             }
                                         }
 
@@ -324,11 +329,7 @@ namespace mDNS.Core
                                                 var r = addressRecord as ARecord;
                                                 addresses.Add(r.Address.ToString());
                                             }
-                                            //else if (addressRecord.Type == RecordType.TXT)
-                                            //{
-                                            //    var r = addressRecord as TXTRecord
-                                            //    addresses.Add(r.IPAddress.ToString());
-                                            //}
+                                            // else if (addressRecord.Type == RecordType.AAAA)
                                         }
 
                                         var serviceDetails = new ServiceDetails(serviceName, serviceType, servicePort, addresses.ToArray());

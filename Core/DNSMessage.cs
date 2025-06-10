@@ -35,7 +35,7 @@ namespace mDNS.Core
 
             // Ignore Authority Records (NSCOUNT)
             //
-            
+
             var additionalInformationCountBytes = messageSpan.Slice(10, 2).ToArray();
             var reversedAdditionalInformationCount = additionalInformationCountBytes.Reverse();
             var additionalInformationCount = BitConverter.ToUInt16(reversedAdditionalInformationCount.ToArray());
@@ -118,14 +118,19 @@ namespace mDNS.Core
                 if (type == RecordType.PTR)
                 {
                     var decodedName = Serialization.DecodeName(recordData, messageSpan);
-                    return new PointerRecord(name, type, @class, ttl, decodedName);
+                    return new PTRRecord(name, type, @class, ttl, decodedName);
                 }
                 else if (type == RecordType.SRV)
                 {
                     (ushort port, string hostname) = Serialization.DecodeService(recordData, messageSpan);
-                    return new ServiceRecord(name, type, @class, ttl, port, hostname);
+                    return new SVRRecord(name, type, @class, ttl, port, hostname);
                 }
-                else if(type == RecordType.A)
+                else if (type == RecordType.TXT)
+                {
+                    var values = Serialization.DecodeTxtRecord(recordData, messageSpan);
+                    return new TXTRecord(name, type, @class, ttl, values);
+                }
+                else if (type == RecordType.A)
                 {
                     IPAddress address = Serialization.DecodeARecord(recordData, messageSpan);
                     return new ARecord(name, type, @class, ttl, address);
